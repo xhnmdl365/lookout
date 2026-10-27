@@ -5,11 +5,11 @@
 	<key>CFBundleDisplayName</key>
 	<string>Claude Tasks</string>
 	<key>CFBundleExecutable</key>
-	<string>TaskFloat</string>
+	<string>ClaudeTasks</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.anthony.taskfloat</string>
+	<string>io.github.xhnmdl365.claudetasks</string>
 	<key>CFBundleName</key>
-	<string>TaskFloat</string>
+	<string>ClaudeTasks</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

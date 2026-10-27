@@ -1,4 +1,4 @@
-// TaskFloat — throwaway spike.
+// Claude Tasks
 // A floating, always-on-top panel listing Claude Code sessions as tasks: desktop app sessions,
 // read-only from the app's own session files, and terminal `claude` sessions, read from their
 // transcripts. Click a row to jump to the session.
@@ -8,7 +8,10 @@ import AppKit
 let home = FileManager.default.homeDirectoryForCurrentUser
 let sessionsRoot = home.appendingPathComponent("Library/Application Support/Claude/claude-code-sessions")
 let projectsRoot = home.appendingPathComponent(".claude/projects")  // CLI transcripts, terminal sessions among them
-let dataDir = home.appendingPathComponent("Library/Application Support/TaskFloat")
+let appSupport = home.appendingPathComponent("Library/Application Support")
+let dataDir = appSupport.appendingPathComponent("ClaudeTasks")
+let legacyDataDir = appSupport.appendingPathComponent("TaskFloat")  // the prototype's folder, moved over once
+let configURL = dataDir.appendingPathComponent("config.json")
 let stateURL = dataDir.appendingPathComponent("state.json")
 let openTasksURL = dataDir.appendingPathComponent("open-tasks.json")
 let judgeURL = dataDir.appendingPathComponent("judge.json")
@@ -18,9 +21,154 @@ let judgeTraceURL = dataDir.appendingPathComponent("judge-trace.jsonl")
 let judgeTraceMDURL = dataDir.appendingPathComponent("judge-trace.md")
 let daysDir = dataDir.appendingPathComponent("days")
 let autoSummaryDays = 3  // past days without a summary get one automatically, this far back
-let claudePath = home.appendingPathComponent(".local/bin/claude").path
-let toolPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(home.path)/.local/bin"
 let english = Locale(identifier: "en_US")
+
+// MARK: - Local config and tools
+
+// The user's own settings, in config.json in the data folder: outside the repo, so a personal
+// setup never ends up shared. Every key is optional; a missing one falls back to a default or
+// to what's found on the machine.
+struct Config: Codable {
+    var claudePath: String?
+    var ghPath: String?
+    var acliPath: String?
+    var githubOrg: String?     // the org for "repo#123" mentions when no folder says which
+    var triageModel: String?   // the model Triage and day summaries run on
+    var activeHours: Double?
+    var blockedDays: Double?
+    var scheduledDays: Double?
+    var prGraceHours: Double?
+    var reverifyHours: Double?
+    var refreshMinutes: Double?
+}
+
+// One outside tool's state: set up, needing a sign-in, or not installed. Claude Code powers
+// Triage and day summaries; GitHub CLI checks PRs; Atlassian CLI (optional) reads Jira tickets.
+struct Integration: Identifiable {
+    enum State { case ready, signedOut, missing }
+    let id: String
+    let name: String
+    let purpose: String
+    let state: State
+    let detail: String
+    let fix: String?  // the command or step that sets it up
+
+    static func check() -> [Integration] {
+        var out: [Integration] = []
+
+        if let claude = Tools.claude {
+            let status = (try? JSONSerialization.jsonObject(with: Data(shell(claude, ["auth", "status"]).utf8))) as? [String: Any]
+            let signedIn = (status?["loggedIn"] as? Bool) == true
+            out.append(Integration(id: "claude", name: "Claude Code", purpose: "Triage and day summaries",
+                                   state: signedIn ? .ready : .signedOut,
+                                   detail: signedIn ? "Signed in" + ((status?["email"] as? String).map { " as \($0)" } ?? "") : "Signed out",
+                                   fix: signedIn ? nil : "claude auth login"))
+        } else {
+            out.append(Integration(id: "claude", name: "Claude Code", purpose: "Triage and day summaries", state: .missing,
+                                   detail: "Not found", fix: "Install Claude Code, or set claudePath in config.json"))
+        }
+
+        if let gh = Tools.gh {
+            let login = shell(gh, ["api", "user", "-q", ".login"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            out.append(Integration(id: "github", name: "GitHub CLI", purpose: "PR status: merged PRs close tasks",
+                                   state: login.isEmpty ? .signedOut : .ready,
+                                   detail: login.isEmpty ? "Signed out" : "Signed in as \(login)",
+                                   fix: login.isEmpty ? "gh auth login" : nil))
+        } else {
+            out.append(Integration(id: "github", name: "GitHub CLI", purpose: "PR status: merged PRs close tasks", state: .missing,
+                                   detail: "Not found", fix: "brew install gh"))
+        }
+
+        if let acli = Tools.acli {
+            let status = shell(acli, ["jira", "auth", "status"])
+            let site = captures(#"Site:\s*(\S+)"#, in: status).first?[1]
+            let ok = status.contains("Authenticated")
+            out.append(Integration(id: "jira", name: "Atlassian CLI", purpose: "Optional: Jira ticket status closes own work",
+                                   state: ok ? .ready : .signedOut,
+                                   detail: ok ? "Connected" + (site.map { " to \($0)" } ?? "") : "Signed out",
+                                   fix: ok ? nil : "acli jira auth login --web"))
+        } else {
+            out.append(Integration(id: "jira", name: "Atlassian CLI", purpose: "Optional: Jira ticket status closes own work",
+                                   state: .missing, detail: "Not installed", fix: "See the README to install acli"))
+        }
+        return out
+    }
+}
+
+// An optional convention the user can add to their own ~/.claude/CLAUDE.md: Claude names a
+// session reviewing a teammate's PR "Team code review: …", so the panel knows it for certain.
+// Kept between markers, so it can be found and removed again.
+enum NamingRule {
+    static let url = home.appendingPathComponent(".claude/CLAUDE.md")
+    static let start = "<!-- claude-tasks: session naming -->"
+    static let end = "<!-- /claude-tasks: session naming -->"
+    static let text = """
+    # Session naming
+
+    When a session's work is reviewing a pull request (a code review, PR review, or review
+    comments), check who wrote the PR (`gh pr view <PR> --json author -q .author.login`) and who
+    I am (`gh api user -q .login`).
+
+    - If the PR is someone else's, name the session "Team code review: <ticket or PR> <short
+      description>". In the Claude desktop app, set it with the session-title tool. In a terminal
+      session, tell me the title so I can set it with /rename.
+    - If the PR is mine (a self-review), don't add the prefix.
+    """
+
+    static var installed: Bool { ((try? String(contentsOf: url, encoding: .utf8)) ?? "").contains(start) }
+
+    static func install() {
+        var current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        guard !current.contains(start) else { return }
+        if !current.isEmpty && !current.hasSuffix("\n") { current += "\n" }
+        current += (current.isEmpty ? "" : "\n") + "\(start)\n\(text)\n\(end)\n"
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? current.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func remove() {
+        guard let current = try? String(contentsOf: url, encoding: .utf8),
+              let a = current.range(of: start), let b = current.range(of: end, range: a.upperBound..<current.endIndex)
+        else { return }
+        var kept = current
+        kept.removeSubrange(a.lowerBound..<b.upperBound)
+        kept = kept.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        try? kept.trimmingCharacters(in: .whitespacesAndNewlines).appending(kept.isEmpty ? "" : "\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+// The prototype kept its data under another name; the first launch moves it across.
+func migrateLegacyData() {
+    let fm = FileManager.default
+    guard !fm.fileExists(atPath: dataDir.path), fm.fileExists(atPath: legacyDataDir.path) else { return }
+    try? fm.moveItem(at: legacyDataDir, to: dataDir)
+}
+
+let config: Config = {
+    migrateLegacyData()
+    return (try? Data(contentsOf: configURL)).flatMap { try? JSONDecoder().decode(Config.self, from: $0) } ?? Config()
+}()
+
+// Where command-line tools usually live. An app started from Finder doesn't get the shell's
+// PATH, so these are searched directly; config.json can name any other location.
+let toolDirs = ["/opt/homebrew/bin", "/usr/local/bin", "\(home.path)/.local/bin", "\(home.path)/bin",
+                "\(home.path)/.npm-global/bin", "\(home.path)/.bun/bin", "/usr/bin", "/bin"]
+let toolPATH = toolDirs.joined(separator: ":")
+
+func findTool(_ name: String, configured: String?) -> String? {
+    ([configured].compactMap { $0 } + toolDirs.map { "\($0)/\(name)" })
+        .first { FileManager.default.isExecutableFile(atPath: $0) }
+}
+
+// Looked up each time, so a tool installed while the app runs is picked up.
+enum Tools {
+    static var claude: String? { findTool("claude", configured: config.claudePath) }
+    static var gh: String? { findTool("gh", configured: config.ghPath) }
+    static var acli: String? { findTool("acli", configured: config.acliPath) }
+}
+
+let triageModel = config.triageModel ?? "sonnet"
 
 // Classification rule (spike):
 //   archived / scheduled-run noise -> ignored, except tracked sessions (see "done" below)
@@ -37,12 +185,12 @@ let english = Locale(identifier: "en_US")
 // Layer 3 (Claude, no hard evidence): a suggestion the user accepts or ignores.
 // Each day's view is kept as a snapshot (days/<date>.json), rewritten only while that day lasts;
 // afterwards only the user's own edits change it.
-let activeHours = 36.0
-let scheduledDays = 7.0  // a scheduled task's latest run shows this long
-let blockedDays = 14.0   // blocked longer than this counts as idle, not "Needs you"
-let prRefreshMinutes = 10.0
-let prGraceHours = 6.0  // session activity this long after the last merge still counts as wrap-up
-let reverifyHours = 24.0  // an unchanged task's verdict is checked again after this long
+let activeHours = config.activeHours ?? 36
+let scheduledDays = config.scheduledDays ?? 7    // a scheduled task's latest run shows this long
+let blockedDays = config.blockedDays ?? 14       // blocked longer than this counts as idle, not "Needs you"
+let prRefreshMinutes = config.refreshMinutes ?? 10  // how often PRs and tickets are checked
+let prGraceHours = config.prGraceHours ?? 6      // activity this long after the last merge still counts as wrap-up
+let reverifyHours = config.reverifyHours ?? 24   // an unchanged task's verdict is checked again after this long
 
 // Mark reasons the rules match on.
 let reasonManual = "Manual"
@@ -388,8 +536,6 @@ func namedTeamReview(_ title: String) -> Bool {
 // only in the status (another team's ticket, say) aren't the task's own.
 func ticketKey(_ title: String) -> String? { captures(#"\b([A-Z][A-Z0-9]+-\d+)\b"#, in: title).first?[1] }
 
-let acliPaths = ["/opt/homebrew/bin/acli", "/usr/local/bin/acli"]
-
 // A work item's status from `acli jira workitem view --json`: its name, whether Jira files it
 // under Done, and when it last changed category. Found by key name, wherever acli nests it.
 func parseTicket(_ out: String) -> (status: String, done: Bool, changedAt: Double?)? {
@@ -549,6 +695,7 @@ final class Store: ObservableObject {
     @Published var judge: JudgeFile?
     @Published var judging = false
     @Published var triageNote: String?  // a short-lived word on the last Triage click
+    @Published var integrations: [Integration] = []
     @Published var runs: [JudgeRun] = []
     @Published var days: [String] = []        // snapshot days, oldest first
     @Published var summarizing: String?       // the day Claude is summarizing
@@ -586,6 +733,7 @@ final class Store: ObservableObject {
             runs = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(JudgeRun.self, from: Data($0.utf8)) }
         }
         reload()
+        checkIntegrations()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.reload() }
     }
 
@@ -663,6 +811,14 @@ final class Store: ObservableObject {
         if !sessions.isEmpty, Date().timeIntervalSince(lastPrRefresh) > prRefreshMinutes * 60 {
             lastPrRefresh = Date()
             refreshPRs()
+        }
+    }
+
+    // What each outside tool can do for this user right now, for the Integrations panel.
+    func checkIntegrations() {
+        DispatchQueue.global(qos: .utility).async {
+            let found = Integration.check()
+            DispatchQueue.main.async { self.integrations = found }
         }
     }
 
@@ -889,11 +1045,12 @@ final class Store: ObservableObject {
 
         \(json)
         """
+        guard let claude = Tools.claude else { return }
         summarizing = day
         let started = Date().timeIntervalSince1970
         DispatchQueue.global(qos: .utility).async {
-            let out = run(claudePath, [
-                "-p", "--model", "sonnet", "--output-format", "json", "--no-session-persistence",
+            let out = run(claude, [
+                "-p", "--model", triageModel, "--output-format", "json", "--no-session-persistence",
                 "--strict-mcp-config", "--max-budget-usd", "0.5", "--tools", "",
             ], stdin: prompt)
             let obj = out.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
@@ -970,7 +1127,7 @@ final class Store: ObservableObject {
             let named = namedTeamReview(s.title)
             if named { team.insert(s.id) }
             let r = Array(Set(s.prs.map(\.url) + prRefs(in: reviewText(s), repo: repoByCwd[s.cwd] ?? nil,
-                                                       defaultOwner: commonOwner(repoByCwd))))
+                                                       defaultOwner: config.githubOrg ?? commonOwner(repoByCwd))))
             guard !r.isEmpty else { continue }
             refs[s.id] = r
             // Otherwise guessed, for sessions named before the convention: talk of a review
@@ -992,9 +1149,10 @@ final class Store: ObservableObject {
         // Own work's tickets, read with the Atlassian CLI when it is installed; their status can
         // move either way, so every one is read again each time.
         let keys = Set(open.filter { !teamReviews.contains($0.id) }.compactMap { ticketKey($0.title) })
+        let gh = Tools.gh, acliPath = Tools.acli  // either may be missing; its checks are then skipped
         DispatchQueue.global(qos: .utility).async {
             var foundTickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]
-            if let acli = acliPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            if let acli = acliPath {
                 for k in keys {
                     let out = shell(acli, ["jira", "workitem", "view", k, "--json", "--fields", "status,statuscategorychangedate"])
                     if let t = parseTicket(out) { foundTickets[k] = t } else { log("acli: no status for \(k)") }
@@ -1003,17 +1161,16 @@ final class Store: ObservableObject {
             }
             var repos = knownRepos
             for f in folders { repos[f] = .some(githubRepo(of: f)) }
-            let login = needMe ? shell("/opt/homebrew/bin/gh", ["api", "user", "-q", ".login"])
-                .trimmingCharacters(in: .whitespacesAndNewlines) : nil
-            let owner = commonOwner(repos)
+            let login = needMe ? gh.map { shell($0, ["api", "user", "-q", ".login"]).trimmingCharacters(in: .whitespacesAndNewlines) } : nil
+            let owner = config.githubOrg ?? commonOwner(repos)
             let urls = Set(open.flatMap { s in
                 s.prs.map(\.url) + prRefs(in: [s.title, s.detail ?? "", s.needs ?? ""].joined(separator: "\n"),
                                           repo: repos[s.cwd] ?? nil, defaultOwner: owner)
-            }).filter { live[$0] == nil || live[$0]?.state == "OPEN" }
+            }).filter { gh != nil && (live[$0] == nil || live[$0]?.state == "OPEN") }
             var found: [String: (state: String, endedAt: Double?, author: String?)] = [:]
             let iso = ISO8601DateFormatter()
             for u in urls {
-                guard let out = run("/opt/homebrew/bin/gh", ["pr", "view", u, "--json", "state,mergedAt,closedAt,author"]),
+                guard let gh, let out = run(gh, ["pr", "view", u, "--json", "state,mergedAt,closedAt,author"]),
                       let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
                       let state = o["state"] as? String else {
                     found[u] = ("UNKNOWN", nil, nil)
@@ -1171,6 +1328,11 @@ final class Store: ObservableObject {
         }
         let prompt = template.replacingOccurrences(of: "{{TASKS_FILE}}", with: openTasksURL.path)
         let schema = #"{"type":"object","properties":{"verdicts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"verdict":{"enum":["done","suggest_done","active"]},"reason":{"type":"string"},"endedAt":{"type":"string"}},"required":["id","verdict","reason","endedAt"]}}},"required":["verdicts"]}"#
+        guard let claude = Tools.claude else {
+            finishJudge(JudgeFile(generatedAt: Date().timeIntervalSince1970, verdicts: [],
+                                  error: "Claude CLI not found: install Claude Code, or set claudePath in config.json"))
+            return
+        }
         let started = Date().timeIntervalSince1970
         judging = true
         let titles = Dictionary(tasks.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
@@ -1178,8 +1340,8 @@ final class Store: ObservableObject {
             // Every step streams to the trace; its last "result" line is what the run returned.
             FileManager.default.createFile(atPath: judgeTraceURL.path, contents: nil)
             let out = try? FileHandle(forWritingTo: judgeTraceURL)
-            _ = run(claudePath, [
-                "-p", "--model", "sonnet", "--output-format", "stream-json", "--verbose", "--no-session-persistence",
+            _ = run(claude, [
+                "-p", "--model", triageModel, "--output-format", "stream-json", "--verbose", "--no-session-persistence",
                 "--strict-mcp-config", "--max-budget-usd", "2", "--json-schema", schema,
                 // Status only: the task list and gh, no transcripts.
                 "--tools", "Read", "Bash", "--allowedTools", "Read", "Bash(gh pr view:*)",
@@ -1975,16 +2137,31 @@ struct DayView: View {
     }
 }
 
-// Text sizes, one row per kind of text, each with − / + and a sample drawn at the chosen size.
+// Settings: which outside tools are set up, the optional session-naming rule, and text sizes
+// (one row per kind of text, each with − / + and a sample drawn at the chosen size).
 struct SettingsView: View {
+    @ObservedObject var store: Store
     @ObservedObject private var sizes = TextSizes.shared
+    @State private var ruleInstalled = NamingRule.installed
+    @State private var showRule = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Text size")
-                    .font(.system(size: 12, weight: .bold))
-                    .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+                heading("Integrations")
+                if store.integrations.isEmpty {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(12)
+                } else {
+                    Card(items: store.integrations) { integrationRow($0) }
+                }
+                Text("Settings of your own, like tool paths or your GitHub org, go in config.json in the app's data folder.")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .padding(.horizontal, 16).padding(.top, 6)
+
+                heading("Session naming")
+                namingCard
+
+                heading("Text size")
                 Card(items: TextRole.allCases) { role in row(role) }
                 Button("Reset to defaults") { sizes.reset() }
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
@@ -1994,6 +2171,72 @@ struct SettingsView: View {
             .padding(.bottom, 8)
             .overlayScrollers()
         }
+        .onAppear { store.checkIntegrations(); ruleInstalled = NamingRule.installed }
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title).font(.system(size: 12, weight: .bold))
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+    }
+
+    private func integrationRow(_ i: Integration) -> some View {
+        let color: Color = switch i.state {
+        case .ready: Palette.done
+        case .signedOut: Palette.needsYou
+        case .missing: Palette.idle
+        }
+        return HStack(alignment: .top, spacing: 9) {
+            Circle().fill(color).frame(width: 7, height: 7).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(i.name).font(.system(size: 12, weight: .semibold))
+                    Text(i.detail).font(.system(size: 11)).foregroundStyle(color)
+                }
+                Text(i.purpose).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                if let fix = i.fix {
+                    Text(fix).font(.system(size: 10.5, design: .monospaced)).textSelection(.enabled)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06)))
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+    }
+
+    // The rule lives in the user's own ~/.claude/CLAUDE.md, added or removed only from here.
+    private var namingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Have Claude name a session reviewing a teammate's PR \"Team code review: …\", so it's recognised at once. Without it, review sessions are still found, by the PR's author.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                if ruleInstalled {
+                    Label("Added to ~/.claude/CLAUDE.md", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.done)
+                    Spacer()
+                    Button("Remove") { NamingRule.remove(); ruleInstalled = NamingRule.installed }
+                } else {
+                    Button("Add to ~/.claude/CLAUDE.md") { NamingRule.install(); ruleInstalled = NamingRule.installed }
+                        .foregroundStyle(Palette.claude)
+                    Spacer()
+                }
+                Button(showRule ? "Hide rule" : "Show rule") { withAnimation(Motion.change) { showRule.toggle() } }
+            }
+            .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
+            if showRule {
+                Text(NamingRule.text).font(.system(size: 10.5, design: .monospaced)).textSelection(.enabled)
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+                    .transition(.opacity)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.07)))
+        .padding(.horizontal, 10)
     }
 
     private func row(_ role: TextRole) -> some View {
@@ -2109,7 +2352,7 @@ struct ContentView: View {
             header.zIndex(1)  // lets the button's hover hint overlap the list below
             if showSettings {
                 Divider()
-                SettingsView().canvas()
+                SettingsView(store: store).canvas()
             } else {
                 if viewDay == nil, let err = store.judge?.error {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -2338,6 +2581,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        migrateLegacyData()  // before anything creates the new data folder
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Claude Tasks")
         let menu = NSMenu()
@@ -2358,10 +2602,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         panel.contentView = NSHostingView(rootView: ContentView(store: Store()))
-        if !panel.setFrameUsingName("TaskFloatPanel"), let f = NSScreen.main?.visibleFrame {
+        if !panel.setFrameUsingName("ClaudeTasksPanel"), let f = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: f.maxX - 380, y: f.maxY - 620))
         }
-        panel.setFrameAutosaveName("TaskFloatPanel")
+        panel.setFrameAutosaveName("ClaudeTasksPanel")
         panel.orderFrontRegardless()
         renderTimer = Timer.scheduledTimer(timeInterval: 2, target: self, selector: #selector(renderIfAsked),
                                            userInfo: nil, repeats: true)
