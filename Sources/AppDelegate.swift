@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var panel: NSPanel!
     var statusItem: NSStatusItem!
     var renderTimer: Timer?
+    var store: Store!
 
     @objc func showPanel() { panel.orderFrontRegardless() }
     @objc func quit() { NSApp.terminate(nil) }
@@ -27,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // look without screen-recording permission. A number in the file renders at that height;
     // the word "actions" shows every row's hover buttons, and "settings" the text-size page.
     @objc func renderIfAsked() {
+        // A `triage-now` file runs Triage, over every listed task when it says "all".
+        let triage = dataDir.appendingPathComponent("triage-now")
+        if let words = try? String(contentsOf: triage, encoding: .utf8) {
+            try? FileManager.default.removeItem(at: triage)
+            store.runJudge(all: words.contains("all"))
+        }
         // A `jump-now` file holding a section title acts like clicking that section's count.
         let jump = dataDir.appendingPathComponent("jump-now")
         if let title = try? String(contentsOf: jump, encoding: .utf8) {
@@ -76,7 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: ContentView(store: Store()))
+        store = Store()
+        panel.contentView = NSHostingView(rootView: ContentView(store: store))
         if !panel.setFrameUsingName("ClaudeTasksPanel"), let f = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: f.maxX - 380, y: f.maxY - 620))
         }

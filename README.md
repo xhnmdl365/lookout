@@ -43,8 +43,10 @@ Anything marked automatically can be undone, and won't be marked again.
 
 ### Triage
 
-**Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. Claude
-looks at status only (the task list and `gh pr view`), never your transcripts. With hard evidence
+**Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. The panel
+first checks PR and ticket states itself, then hands Claude the task list with those states in
+the prompt. Claude runs with no tools, so it sees only that list, never your transcripts or other
+files, and answers in one go. With hard evidence
 it marks a task done; otherwise it suggests wrapping up, and you decide. Only tasks that changed
 since their last verdict are sent; unchanged ones are rechecked once a day.
 

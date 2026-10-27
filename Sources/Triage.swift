@@ -90,35 +90,61 @@ extension Store {
         let sent = Set(tasks.map(\.id)), listedIds = Set(listed.map(\.id))
         let carried: [Verdict] = (judge?.verdicts ?? []).filter { listedIds.contains($0.id) && !sent.contains($0.id) }
             .map { v in var v = v; v.at = v.at ?? self.judge?.generatedAt; return v }
-        let iso = ISO8601DateFormatter()
-        let rows: [[String: Any]] = tasks.map { s in
-            [
-                "id": s.id, "title": s.title, "project": s.project,
-                "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)" : "desktop",
-                "kind": teamReviews.contains(s.id) ? "team code review" : "own work",
-                "ticket": ticketKey(s.title).map { k in tickets[k].map { "\(k): \($0.status)" } ?? k } ?? "",
-                "status": s.pendingAsk != nil ? "blocked" : s.status ?? "", "detail": s.detail ?? "", "needs": s.nextStep ?? "",
-                "lastActivity": iso.string(from: s.lastActivity),
-                "prs": s.prs.map { ["url": $0.url, "recordedState": prLive[$0.url]?.state ?? $0.state] },
-            ]
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted]),
-              (try? data.write(to: openTasksURL)) != nil,
-              let promptURL = Bundle.main.url(forResource: "judge-prompt", withExtension: "md"),
-              let template = try? String(contentsOf: promptURL, encoding: .utf8) else {
-            finishJudge(JudgeFile(generatedAt: Date().timeIntervalSince1970, verdicts: [],
-                                  error: "Couldn't write the task list or find judge-prompt.md"))
-            return
-        }
-        let prompt = template.replacingOccurrences(of: "{{TASKS_FILE}}", with: openTasksURL.path)
-        let schema = #"{"type":"object","properties":{"verdicts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"verdict":{"enum":["done","suggest_done","active"]},"reason":{"type":"string"},"endedAt":{"type":"string"}},"required":["id","verdict","reason","endedAt"]}}},"required":["verdicts"]}"#
         guard let claude = Tools.claude else {
             finishJudge(JudgeFile(generatedAt: Date().timeIntervalSince1970, verdicts: [],
                                   error: "Claude CLI not found: install Claude Code, or set claudePath in config.json"))
             return
         }
-        let started = Date().timeIntervalSince1970
         judging = true
+        // PR and ticket states are checked here first and handed over, so Claude needs no tools
+        // and answers in one turn.
+        refreshPRs { self.startJudge(claude, tasks: tasks, carried: carried) }
+    }
+
+    // A task as Claude sees it: its status summary, plus PR and ticket states the app just checked.
+    private func triageRow(_ s: Session, iso: ISO8601DateFormatter) -> [String: Any] {
+        let recorded = Dictionary(s.prs.map { ($0.url, $0.state) }, uniquingKeysWith: { a, _ in a })
+        let prs: [[String: Any]] = (textRefs[s.id] ?? s.prs.map(\.url)).sorted().map { url in
+            let live = prLive[url]
+            var pr: [String: Any] = [
+                "pr": url.replacingOccurrences(of: "https://github.com/", with: ""),
+                "state": live?.state ?? recorded[url] ?? "UNKNOWN",
+                "checked": live != nil && live?.state != "UNKNOWN",
+            ]
+            if let e = live?.endedAt { pr["endedAt"] = iso.string(from: Date(timeIntervalSince1970: e)) }
+            if let a = live?.author, let me { pr["author"] = a == me ? "the user" : "a teammate" }
+            return pr
+        }
+        var ticket = ""
+        if let k = ticketKey(s.title) {
+            ticket = tickets[k].map { "\(k): \($0.status)" + ($0.done ? " (Done category)" : "") } ?? "\(k): status unknown"
+        }
+        return [
+            "id": s.id, "title": s.title, "project": s.project,
+            "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)" : "desktop",
+            "kind": teamReviews.contains(s.id) ? "team code review" : "own work",
+            "ticket": ticket,
+            "status": s.pendingAsk != nil ? "blocked" : s.status ?? "", "detail": s.detail ?? "", "needs": s.nextStep ?? "",
+            "lastActivity": iso.string(from: s.lastActivity),
+            "prs": prs,
+        ]
+    }
+
+    private func startJudge(_ claude: String, tasks: [Session], carried: [Verdict]) {
+        let iso = ISO8601DateFormatter()
+        let rows = tasks.map { triageRow($0, iso: iso) }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys]),
+              let list = String(data: data, encoding: .utf8),
+              let promptURL = Bundle.main.url(forResource: "judge-prompt", withExtension: "md"),
+              let template = try? String(contentsOf: promptURL, encoding: .utf8) else {
+            finishJudge(JudgeFile(generatedAt: Date().timeIntervalSince1970, verdicts: [],
+                                  error: "Couldn't build the task list or find judge-prompt.md"))
+            return
+        }
+        try? data.write(to: openTasksURL)  // a copy of what was sent, for checking
+        let prompt = template.replacingOccurrences(of: "{{TASKS}}", with: list)
+        let schema = #"{"type":"object","properties":{"verdicts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"verdict":{"enum":["done","suggest_done","active"]},"reason":{"type":"string"},"endedAt":{"type":"string"}},"required":["id","verdict","reason","endedAt"]}}},"required":["verdicts"]}"#
+        let started = Date().timeIntervalSince1970
         let titles = Dictionary(tasks.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
         DispatchQueue.global(qos: .utility).async {
             // Every step streams to the trace; its last "result" line is what the run returned.
@@ -127,8 +153,8 @@ extension Store {
             _ = run(claude, [
                 "-p", "--model", triageModel, "--output-format", "stream-json", "--verbose", "--no-session-persistence",
                 "--strict-mcp-config", "--max-budget-usd", "2", "--json-schema", schema,
-                // Status only: the task list and gh, no transcripts.
-                "--tools", "Read", "Bash", "--allowedTools", "Read", "Bash(gh pr view:*)",
+                // No tools: everything it needs is in the prompt, so it can't read anything else.
+                "--tools", "",
             ], stdin: prompt, stdout: out)
             try? out?.close()
             var result = JudgeFile(generatedAt: started, verdicts: [], error: "Claude returned no result")

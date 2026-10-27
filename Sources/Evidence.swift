@@ -148,7 +148,8 @@ extension Store {
         teamReviews = team
     }
 
-    func refreshPRs() {
+    // `then` runs on the main queue once the new states are in, before the reload they trigger.
+    func refreshPRs(then: (() -> Void)? = nil) {
         // Open tasks' PRs, their own and those named in their text. Open ones may have changed;
         // finished ones need their merge time once; ones gh can't find are not asked again.
         let open = sessions.filter { !$0.archived && !$0.deleted && !isDone($0) && !isOnHold($0) && $0.scheduledTaskId == nil }
@@ -192,6 +193,7 @@ extension Store {
                 if let login, !login.isEmpty { self.me = login }
                 self.prLive.merge(found) { _, new in new }
                 self.tickets.merge(foundTickets) { _, new in new }
+                then?()
                 self.reload()
             }
         }
