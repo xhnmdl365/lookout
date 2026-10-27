@@ -140,3 +140,7 @@ Text sizes are set in **Settings → Text size**.
   updates; fields the panel can't read are left blank.
 - Switching to a running terminal session works with Terminal.app; macOS asks once for
   permission to control it.
+
+## License
+
+[MIT](LICENSE)
