@@ -1671,11 +1671,10 @@ struct RowShell<Lines: View, Actions: View>: View {
     }
 }
 
-// A section's rows on one rounded card, hairlines between them, so each group reads as a unit
-// against the window's grey.
+// A section's rows on one rounded card, full-width hairlines between them, so each group reads
+// as a unit against the window's grey.
 struct Card<Item: Identifiable, RowView: View>: View {
     let items: [Item]
-    let inset: (Item) -> CGFloat  // where each row's divider starts
     @ViewBuilder let row: (Item) -> RowView
 
     var body: some View {
@@ -1683,7 +1682,7 @@ struct Card<Item: Identifiable, RowView: View>: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                 // One unit per row, its divider included, so rows fade in and out whole.
                 VStack(spacing: 0) {
-                    if i > 0 { Divider().padding(.leading, inset(item)) }
+                    if i > 0 { Divider() }
                     row(item)
                 }
                 .transition(Motion.row)
@@ -1968,7 +1967,7 @@ struct DayView: View {
     @ViewBuilder private func group(_ title: String, _ tint: Color, _ items: [SnapTask], _ snap: DaySnapshot) -> some View {
         if !items.isEmpty {
             Section {
-                Card(items: items, inset: { _ in 28 }) { SnapRow(t: $0, day: day, snap: snap, store: store) }
+                Card(items: items) { SnapRow(t: $0, day: day, snap: snap, store: store) }
             } header: {
                 SectionHeader(title: title, count: items.count, tint: tint, collapsible: false, open: true, toggle: {})
             }
@@ -1986,7 +1985,7 @@ struct SettingsView: View {
                 Text("Text size")
                     .font(.system(size: 12, weight: .bold))
                     .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
-                Card(items: TextRole.allCases, inset: { _ in 12 }) { role in row(role) }
+                Card(items: TextRole.allCases) { role in row(role) }
                 Button("Reset to defaults") { sizes.reset() }
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
                     .disabled(sizes.isDefault)
@@ -2258,7 +2257,7 @@ struct ContentView: View {
                     let entries = spec.items.flatMap { s in
                         [Entry(session: s, nested: false)] + store.children(of: s).map { Entry(session: $0, nested: true) }
                     }
-                    Card(items: entries, inset: { $0.nested ? 49 : 28 }) { e in
+                    Card(items: entries) { e in
                         Row(s: e.session, store: store, nested: e.nested)
                     }
                     .transition(.opacity)  // a section's card fades in when its first task arrives
