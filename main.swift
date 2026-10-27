@@ -72,6 +72,11 @@ struct Session: Identifiable, Equatable {
     var branch: String? = nil  // terminal sessions: the git branch they were on
     var parentId: String? = nil  // desktop sessions started from another session (shown nested under it)
     var startedAt: Date? = nil
+    var pendingAsk: String? = nil  // a question the session's last turn left for the user, still unanswered
+
+    // Waiting on the user: the app's own summary says blocked, or the last turn asked something.
+    var waiting: Bool { status == "blocked" || pendingAsk != nil }
+    var nextStep: String? { needs.flatMap { $0.isEmpty ? nil : $0 } ?? pendingAsk }
 
     var age: TimeInterval { Date().timeIntervalSince(lastActivity) }
 
@@ -196,6 +201,42 @@ func relative(_ date: Date) -> String {
     f.locale = english
     f.unitsStyle = .short
     return f.localizedString(for: date, relativeTo: Date())
+}
+
+// Where the CLI keeps a session's transcript: its folder, with every character that isn't a
+// letter or digit turned into "-", under ~/.claude/projects.
+func transcriptURL(cwd: String, cliId: String) -> URL {
+    let folder = String(cwd.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+    return projectsRoot.appendingPathComponent(folder).appendingPathComponent("\(cliId).jsonl")
+}
+
+// The question a session's last turn left open: its closing wrap-up asked something (or said it
+// is blocked on the user), and no message from the user has come since. Read from the end of the
+// transcript only.
+func pendingQuestion(in url: URL) -> String? {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? h.close() }
+    let size = (try? h.seekToEnd()) ?? 0
+    try? h.seek(toOffset: size > 300_000 ? size - 300_000 : 0)
+    let tail = String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
+    var pending: String?
+    for line in tail.split(separator: "\n") {
+        guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+        let content = (o["message"] as? [String: Any])?["content"]
+        if o["type"] as? String == "assistant" {
+            for c in content as? [[String: Any]] ?? [] where (c["name"] as? String)?.hasSuffix("__wrap_up") == true {
+                let input = c["input"] as? [String: Any] ?? [:]
+                let ask = (input["ask"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                pending = ask ?? ((input["blocked"] as? Bool) == true ? input["recap"] as? String : nil)
+            }
+        } else if o["type"] as? String == "user", (o["isMeta"] as? Bool) != true {
+            // A reply typed by the user answers it; tool results and system notices don't.
+            let typed = (content as? String).map { !$0.hasPrefix("<") }
+                ?? (content as? [[String: Any]])?.contains { $0["type"] as? String == "text" } ?? false
+            if typed { pending = nil }
+        }
+    }
+    return pending
 }
 
 // Who wrote a transcript, from its first lines: "cli" is an interactive terminal run,
@@ -526,6 +567,8 @@ final class Store: ObservableObject {
     private var transcriptCache: [String: (mtime: Double, terminal: Bool, session: Session?)] = [:]
     // Desktop session file path -> what it held at that mtime. Touched only on loadQueue.
     private var sessionCache: [String: (mtime: Double, session: Session)] = [:]
+    // Transcript path -> the question it left open at that mtime. Touched only on loadQueue.
+    private var askCache: [String: (mtime: Double, ask: String?)] = [:]
 
     init() {
         try? FileManager.default.createDirectory(at: daysDir, withIntermediateDirectories: true)
@@ -565,7 +608,7 @@ final class Store: ObservableObject {
                 let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate?.timeIntervalSince1970 ?? 0
                 if let cached = self.sessionCache[url.path], cached.mtime == mtime {
-                    out.append(cached.session)
+                    out.append(self.withPendingAsk(cached.session))
                     continue
                 }
                 guard let data = try? Data(contentsOf: url),
@@ -594,7 +637,7 @@ final class Store: ObservableObject {
                     parentId: (d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String,
                     startedAt: (d["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
                 self.sessionCache[url.path] = (mtime, session)
-                out.append(session)
+                out.append(self.withPendingAsk(session))
             }
             out.sort { $0.lastActivity > $1.lastActivity }
             // Keep only the newest unarchived run of each scheduled task.
@@ -621,6 +664,25 @@ final class Store: ObservableObject {
             lastPrRefresh = Date()
             refreshPRs()
         }
+    }
+
+    // Adds the question a desktop session's last turn left open, read again only when its
+    // transcript changes. Archived and scheduled sessions are skipped: nobody's waiting there.
+    private func withPendingAsk(_ s: Session) -> Session {
+        guard !s.archived, s.scheduledTaskId == nil, let cli = s.cliId else { return s }
+        let url = transcriptURL(cwd: s.runCwd, cliId: cli)
+        let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate?.timeIntervalSince1970 ?? 0
+        let ask: String?
+        if let cached = askCache[url.path], cached.mtime == mtime {
+            ask = cached.ask
+        } else {
+            ask = pendingQuestion(in: url)
+            askCache[url.path] = (mtime, ask)
+        }
+        var s = s
+        s.pendingAsk = ask
+        return s
     }
 
     // Terminal sessions; each transcript is read in full only when it changes.
@@ -760,12 +822,12 @@ final class Store: ObservableObject {
     private func writeTodaySnapshot() {
         func snap(_ s: Session, _ section: String) -> SnapTask {
             SnapTask(id: s.id, title: s.title, project: s.project, section: section, detail: s.detail,
-                     needs: s.needs, doneReason: section == "done" ? mark(s)?.reason : nil,
+                     needs: s.nextStep, doneReason: section == "done" ? mark(s)?.reason : nil,
                      lastActivity: s.lastActivity.timeIntervalSince1970, deleted: s.deleted)
         }
         // Flat: nested children are recorded under their own section.
         let open = sessions.compactMap { s in baseSection(s).map { snap(s, $0) } }
-        let blockedRuns = scheduled.filter { $0.status == "blocked" }.map { snap($0, "needsYou") }
+        let blockedRuns = scheduled.filter(\.waiting).map { snap($0, "needsYou") }
         let tasks = open + blockedRuns + doneToday.map { snap($0, "done") }
         guard let data = try? JSONEncoder().encode(tasks), data != lastSnapshotTasks else { return }
         lastSnapshotTasks = data
@@ -1094,7 +1156,7 @@ final class Store: ObservableObject {
                 "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)" : "desktop",
                 "kind": teamReviews.contains(s.id) ? "team code review" : "own work",
                 "ticket": ticketKey(s.title).map { k in tickets[k].map { "\(k): \($0.status)" } ?? k } ?? "",
-                "status": s.status ?? "", "detail": s.detail ?? "", "needs": s.needs ?? "",
+                "status": s.pendingAsk != nil ? "blocked" : s.status ?? "", "detail": s.detail ?? "", "needs": s.nextStep ?? "",
                 "lastActivity": iso.string(from: s.lastActivity),
                 "prs": s.prs.map { ["url": $0.url, "recordedState": prLive[$0.url]?.state ?? $0.state] },
             ]
@@ -1171,7 +1233,7 @@ final class Store: ObservableObject {
     private func baseSection(_ s: Session) -> String? {
         guard s.scheduledTaskId == nil, !s.archived, !s.deleted, !isDone(s) else { return nil }
         if isOnHold(s) { return "onHold" }
-        if s.status == "blocked" && within(s, days: blockedDays) { return "needsYou" }
+        if s.waiting && within(s, days: blockedDays) { return "needsYou" }
         if recent(s) { return "active" }
         return "idle"
     }
@@ -1184,11 +1246,26 @@ final class Store: ObservableObject {
 
     func children(of s: Session) -> [Session] { openTasks.filter { $0.parentId == s.id } }
 
+    // A section's top-level tasks, newest first. A task with children sorts by its family's
+    // newest activity, so a child's fresh progress lifts the whole family. And when a child is
+    // waiting on the user, its whole family moves up to "Needs you" (from In progress or Idle;
+    // a family the user put on hold stays there).
     private func top(_ section: String) -> [Session] {
-        sessions.filter { baseSection($0) == section && !isNested($0) }
+        var newestChild: [String: Date] = [:], childWaits = Set<String>()
+        for c in openTasks {
+            guard let p = c.parentId else { continue }
+            newestChild[p] = max(newestChild[p] ?? .distantPast, c.lastActivity)
+            if baseSection(c) == "needsYou" { childWaits.insert(p) }
+        }
+        let latest = { (s: Session) in max(s.lastActivity, newestChild[s.id] ?? .distantPast) }
+        let familySection = { (s: Session) -> String? in
+            let own = self.baseSection(s)
+            return (own == "active" || own == "idle") && childWaits.contains(s.id) ? "needsYou" : own
+        }
+        return sessions.filter { familySection($0) == section && !isNested($0) }.sorted { latest($0) > latest($1) }
     }
 
-    var needsYou: [Session] { top("needsYou") + scheduled.filter { $0.status == "blocked" } }
+    var needsYou: [Session] { top("needsYou") + scheduled.filter(\.waiting) }
     var active: [Session] { top("active") }
     var idle: [Session] { top("idle") }
     var onHold: [Session] { top("onHold") }
@@ -1226,7 +1303,7 @@ final class Store: ObservableObject {
         if s.deleted { return .gray.opacity(0.4) }
         if isDone(s) { return Palette.done }
         if isOnHold(s) { return Palette.onHold }
-        if s.status == "blocked" { return Palette.needsYou }
+        if s.waiting { return Palette.needsYou }
         if s.scheduledTaskId != nil { return Palette.scheduled }
         return recent(s) ? Palette.active : Palette.idle
     }
@@ -1666,7 +1743,7 @@ struct Row: View {
             if let d = s.detail, !done {
                 Text(d).font(.system(size: sizes.pt(.detail))).foregroundStyle(.secondary).lineLimit(2)
             }
-            if let n = s.needs, !done, s.status == "blocked" {
+            if let n = s.nextStep, !done, s.waiting {
                 Label(n, systemImage: "arrow.turn.down.right")
                     .font(.system(size: sizes.pt(.detail))).foregroundStyle(Palette.needsYou).lineLimit(2)
             }
@@ -1981,7 +2058,7 @@ struct ContentView: View {
                         trailing: ("Mark all done", { store.markAllDone(store.idle) })),
             SectionSpec(title: "On hold", short: "On hold", tint: Palette.onHold, items: store.onHold, collapsible: true),
             SectionSpec(title: "Scheduled", short: "Scheduled", tint: Palette.scheduled,
-                        items: store.scheduled.filter { $0.status != "blocked" }, collapsible: true),
+                        items: store.scheduled.filter { !$0.waiting }, collapsible: true),
             SectionSpec(title: "Done today", short: "Done", tint: Palette.done, items: store.doneToday,
                         collapsible: true, startOpen: true),
         ]
