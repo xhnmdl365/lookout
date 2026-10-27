@@ -1,0 +1,5 @@
+# Build output
+TaskFloat.app/
+
+# macOS
+.DS_Store
