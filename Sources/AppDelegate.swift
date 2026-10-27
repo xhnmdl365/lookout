@@ -28,11 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // look without screen-recording permission. A number in the file renders at that height;
     // the word "actions" shows every row's hover buttons, and "settings" the text-size page.
     @objc func renderIfAsked() {
-        // A `triage-now` file runs Triage, over every listed task when it says "all".
+        // A `triage-now` file runs Triage, over every listed task when it says "all"; "dry" only
+        // writes the task list Claude would get.
         let triage = dataDir.appendingPathComponent("triage-now")
         if let words = try? String(contentsOf: triage, encoding: .utf8) {
             try? FileManager.default.removeItem(at: triage)
-            store.runJudge(all: words.contains("all"))
+            store.runJudge(all: words.contains("all"), dry: words.contains("dry"))
         }
         // A `jump-now` file holding a section title acts like clicking that section's count.
         let jump = dataDir.appendingPathComponent("jump-now")

@@ -13,6 +13,16 @@ struct PR: Hashable {
     let state: String
 }
 
+// A PR as gh reported it.
+struct PRInfo {
+    var state: String
+    var endedAt: Double? = nil      // when it was merged or closed
+    var author: String? = nil
+    var branch: String? = nil       // its head branch
+    var title: String? = nil
+    var reviewers = Set<String>()   // logins asked to review it, or who did
+}
+
 struct Session: Identifiable, Equatable {
     let id: String
     let cliId: String?
@@ -31,6 +41,11 @@ struct Session: Identifiable, Equatable {
     var parentId: String? = nil  // desktop sessions started from another session (shown nested under it)
     var startedAt: Date? = nil
     var pendingAsk: String? = nil  // a question the session's last turn left for the user, still unanswered
+    var gitBranch: String? = nil   // the folder's branch its transcript last recorded, terminal or desktop
+    var workBranches: [String] = []  // branches the session itself checked out or pushed, oldest first
+    var reviewRefs: [String] = []  // PRs it checked out or reviewed with gh: "#12" or "owner/repo#12"
+    var diffRefs: [String] = []    // PRs it only diffed with gh
+    var pushed = false             // it pushed a branch or opened a PR
 
     // Waiting on the user: the app's own summary says blocked, or the last turn asked something.
     var waiting: Bool { status == "blocked" || pendingAsk != nil }
@@ -67,6 +82,8 @@ struct Manual: Codable {
     var dismissed: Set<String>? = []    // auto marks undone ("<id>") and suggestions ignored ("s:<id>")
     var known: [String: Known]? = [:]   // sessions seen open, so archive/delete can close them
     var onHold: [String: Double]? = [:] // id -> when the user put it on hold
+    var kindOverrides: [String: String]? = [:]   // id -> "review" or "own", the user's correction
+    var ticketOverrides: [String: String]? = [:] // id -> the user's ticket key, "" for none
 }
 
 struct Verdict: Codable {

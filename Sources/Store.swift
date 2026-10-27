@@ -17,12 +17,13 @@ final class Store: ObservableObject {
     @Published var summarizing: String?       // the day Claude is summarizing
     var lastSnapshotTasks: Data?
     var summaryTried: [String: Date] = [:]  // day -> last auto attempt, retried after 30 min
-    var prLive: [String: (state: String, endedAt: Double?, author: String?)] = [:]  // PR url -> from gh
+    var prLive: [String: PRInfo] = [:]  // PR url -> from gh
     var repoByCwd: [String: String?] = [:]  // folder -> its GitHub "owner/repo", nil when not GitHub
     var me: String?                         // the GitHub login, to tell own PRs from teammates'
     var textRefs: [String: [String]] = [:]  // task id -> PRs it names, its own and in its text
     var teamReviews = Set<String>()    // tasks reviewing a teammate's PR
     var tickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]  // Jira key -> from acli
+    var ticketMissing = Set<String>()  // keys acli couldn't read, not asked again
     private var lastPrRefresh = Date.distantPast
     private var timer: Timer?
     private let loadQueue = DispatchQueue(label: "taskfloat.load", qos: .utility)
@@ -30,8 +31,12 @@ final class Store: ObservableObject {
     private var transcriptCache: [String: (mtime: Double, terminal: Bool, session: Session?)] = [:]
     // Desktop session file path -> what it held at that mtime. Touched only on loadQueue.
     private var sessionCache: [String: (mtime: Double, session: Session)] = [:]
-    // Transcript path -> the question it left open at that mtime. Touched only on loadQueue.
-    private var askCache: [String: (mtime: Double, ask: String?)] = [:]
+    // Transcript path -> the question it left open, and what it says about the work, at that
+    // mtime. Touched only on loadQueue.
+    private var askCache: [String: (mtime: Double, ask: String?, facts: TranscriptFacts)] = [:]
+    // Whether a load has finished; the first one skips reading whole transcripts, so the list
+    // shows at once and the next pass fills in. Touched only on loadQueue.
+    private var loadedOnce = false
 
     init() {
         try? FileManager.default.createDirectory(at: daysDir, withIntermediateDirectories: true)
@@ -110,6 +115,7 @@ final class Store: ObservableObject {
                 guard let t = s.scheduledTaskId else { return true }
                 return !s.archived && seenTasks.insert(t).inserted
             }
+            self.loadedOnce = true
             DispatchQueue.main.async { self.apply(out, deletedAt: deletedAt) }
         }
         // Dropping a `run-now` file in the data folder starts a judge run (for scripts and schedules).
@@ -138,22 +144,31 @@ final class Store: ObservableObject {
         }
     }
 
-    // Adds the question a desktop session's last turn left open, read again only when its
-    // transcript changes. Archived and scheduled sessions are skipped: nobody's waiting there.
+    // Adds the question a desktop session's last turn left open, and its branch and reviewed PRs,
+    // read again only when its transcript changes. Archived and scheduled sessions are skipped:
+    // nobody's waiting there.
     private func withPendingAsk(_ s: Session) -> Session {
         guard !s.archived, s.scheduledTaskId == nil, let cli = s.cliId else { return s }
         let url = transcriptURL(cwd: s.runCwd, cliId: cli)
         let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate?.timeIntervalSince1970 ?? 0
-        let ask: String?
+        let ask: String?, facts: TranscriptFacts
         if let cached = askCache[url.path], cached.mtime == mtime {
-            ask = cached.ask
+            (ask, facts) = (cached.ask, cached.facts)
+        } else if !loadedOnce && askCache[url.path] == nil {
+            (ask, facts) = (pendingQuestion(in: url), TranscriptFacts())  // not cached: read in full next pass
         } else {
             ask = pendingQuestion(in: url)
-            askCache[url.path] = (mtime, ask)
+            facts = scanTranscript(url, from: askCache[url.path]?.facts ?? TranscriptFacts())
+            askCache[url.path] = (mtime, ask, facts)
         }
         var s = s
         s.pendingAsk = ask
+        s.gitBranch = facts.branch
+        s.workBranches = facts.branches
+        s.reviewRefs = facts.reviewRefs
+        s.diffRefs = facts.diffRefs
+        s.pushed = facts.pushed
         return s
     }
 
@@ -324,6 +339,32 @@ final class Store: ObservableObject {
             for s in items { manual.marks?[s.id] = Mark(at: now, reason: reasonManual, auto: false) }
             save()
         }
+    }
+
+    // MARK: Corrections
+
+    // The user's say on what a task is: "review", "own", or nil to detect it.
+    func kindOverride(_ s: Session) -> String? { manual.kindOverrides?[s.id] }
+
+    func setKind(_ s: Session, _ kind: String?) {
+        withAnimation(Motion.change) {
+            var k = manual.kindOverrides ?? [:]
+            k[s.id] = kind
+            manual.kindOverrides = k
+            save()
+        }
+        reload()
+    }
+
+    // The user's ticket for a task: a key, "" for none, or nil to detect it.
+    func ticketOverride(_ s: Session) -> String? { manual.ticketOverrides?[s.id] }
+
+    func setTicket(_ s: Session, _ key: String?) {
+        var t = manual.ticketOverrides ?? [:]
+        t[s.id] = key
+        manual.ticketOverrides = t
+        save()
+        refreshPRs()  // reads the new ticket's status, then reloads
     }
 
     // MARK: Suggestions (layer 3)

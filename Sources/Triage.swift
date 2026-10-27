@@ -77,7 +77,8 @@ extension Store {
         return !v.current(for: s, runAt: j.generatedAt) || age > reverifyHours * 3600
     }
 
-    func runJudge(all: Bool = false) {
+    // `dry` only writes the task list Claude would get, to open-tasks.json, for checking.
+    func runJudge(all: Bool = false, dry: Bool = false) {
         guard !judging else { return }
         let listed = judged
         let tasks = all ? listed : listed.filter(needsTriage)
@@ -98,7 +99,17 @@ extension Store {
         judging = true
         // PR and ticket states are checked here first and handed over, so Claude needs no tools
         // and answers in one turn.
-        refreshPRs { self.startJudge(claude, tasks: tasks, carried: carried) }
+        refreshPRs {
+            if dry {
+                let iso = ISO8601DateFormatter()
+                let data = try? JSONSerialization.data(withJSONObject: tasks.map { self.triageRow($0, iso: iso) },
+                                                       options: [.prettyPrinted, .sortedKeys])
+                try? data?.write(to: openTasksURL)
+                self.judging = false
+            } else {
+                self.startJudge(claude, tasks: tasks, carried: carried)
+            }
+        }
     }
 
     // A task as Claude sees it: its status summary, plus PR and ticket states the app just checked.
@@ -115,15 +126,15 @@ extension Store {
             if let a = live?.author, let me { pr["author"] = a == me ? "the user" : "a teammate" }
             return pr
         }
-        var ticket = ""
-        if let k = ticketKey(s.title) {
-            ticket = tickets[k].map { "\(k): \($0.status)" + ($0.done ? " (Done category)" : "") } ?? "\(k): status unknown"
+        var ticketLine = ""
+        if let k = ticket(for: s) {
+            ticketLine = tickets[k].map { "\(k): \($0.status)" + ($0.done ? " (Done category)" : "") } ?? "\(k): status unknown"
         }
         return [
             "id": s.id, "title": s.title, "project": s.project,
             "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)" : "desktop",
             "kind": teamReviews.contains(s.id) ? "team code review" : "own work",
-            "ticket": ticket,
+            "ticket": ticketLine,
             "status": s.pendingAsk != nil ? "blocked" : s.status ?? "", "detail": s.detail ?? "", "needs": s.nextStep ?? "",
             "lastActivity": iso.string(from: s.lastActivity),
             "prs": prs,

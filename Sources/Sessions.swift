@@ -38,6 +38,113 @@ func pendingQuestion(in url: URL) -> String? {
     return pending
 }
 
+// PRs a shell command looks at with `gh pr <subcommand> <n or URL>`, with `-R/--repo
+// owner/repo` when given. A number alone comes back as "#12", meaning the session's own repo.
+func prCommandRefs(_ command: String, _ subcommands: Set<String>) -> [String] {
+    var refs: [String] = []
+    for segment in command.components(separatedBy: CharacterSet(charactersIn: ";&|\n")) {
+        let words = segment.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let gh = words.firstIndex(where: { ($0 as NSString).lastPathComponent == "gh" }),
+              words.count > gh + 3, words[gh + 1] == "pr", subcommands.contains(words[gh + 2])
+        else { continue }
+        let args = Array(words[(gh + 3)...]).map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
+        var repo: String?, target: String?
+        var i = 0
+        while i < args.count {
+            let a = args[i]
+            if a == "-R" || a == "--repo" {
+                repo = i + 1 < args.count ? args[i + 1] : nil
+                i += 2
+                continue
+            }
+            if a.hasPrefix("--repo=") { repo = String(a.dropFirst("--repo=".count)) }
+            if target == nil, (a.contains("github.com/") && a.contains("/pull/")) || Int(a) != nil { target = a }
+            i += 1
+        }
+        if let t = target { refs.append(Int(t) != nil ? (repo ?? "") + "#" + t : t) }
+    }
+    return refs
+}
+
+// Branches a shell command works on: `git checkout|switch [-b|-c] <branch>` and the branch in
+// `git push <remote> <branch>`. Sessions sharing a folder share its current branch, so only a
+// branch a session moved to or pushed is its own.
+func branchCommandRefs(_ command: String) -> [String] {
+    var branches: [String] = []
+    for segment in command.components(separatedBy: CharacterSet(charactersIn: ";&|\n")) {
+        let words = segment.split(whereSeparator: \.isWhitespace).map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
+        guard let git = words.firstIndex(where: { ($0 as NSString).lastPathComponent == "git" }), words.count > git + 2
+        else { continue }
+        let args = words[(git + 2)...].filter { !$0.hasPrefix("-") }
+        switch words[git + 1] {
+        case "checkout", "switch":
+            // `git checkout -- <file>` restores files, it doesn't switch.
+            if !words.contains("--"), let b = args.first, b != "." { branches.append(b) }
+        case "push":
+            if args.count >= 2 {
+                let ref = args[args.index(after: args.startIndex)]
+                let b = ref.split(separator: ":").last.map(String.init) ?? ref
+                branches.append(b.replacingOccurrences(of: "refs/heads/", with: ""))
+            }
+        default:
+            break
+        }
+    }
+    return branches
+}
+
+// The shell commands in an assistant transcript entry.
+func commands(inEntry o: [String: Any]) -> [String] {
+    guard o["type"] as? String == "assistant" else { return [] }
+    return ((o["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []).compactMap { c -> String? in
+        guard c["type"] as? String == "tool_use" else { return nil }
+        return (c["input"] as? [String: Any])?["command"] as? String
+    }
+}
+
+// What a transcript says about the work, kept up as it grows: only lines added since the last
+// look are read, since transcripts only ever get appended to.
+struct TranscriptFacts {
+    var offset: UInt64 = 0
+    var branch: String?            // the folder's branch, as last recorded
+    var branches: [String] = []    // branches the session itself checked out or pushed, oldest first
+    var reviewRefs: [String] = []  // PRs it checked out or reviewed with gh
+    var diffRefs: [String] = []    // PRs it only diffed: a reviewer does, but so does the author
+    var pushed = false             // it pushed a branch or opened a PR: its own work
+
+    mutating func add(_ commands: [String]) {
+        for c in commands {
+            for r in prCommandRefs(c, ["checkout", "review"]) where !reviewRefs.contains(r) { reviewRefs.append(r) }
+            for r in prCommandRefs(c, ["diff"]) where !diffRefs.contains(r) { diffRefs.append(r) }
+            for b in branchCommandRefs(c) {
+                branches.removeAll { $0 == b }
+                branches.append(b)
+            }
+            if c.range(of: #"\bgit\s+push\b|\bgh\s+pr\s+create\b"#, options: .regularExpression) != nil { pushed = true }
+        }
+    }
+}
+
+func scanTranscript(_ url: URL, from facts: TranscriptFacts) -> TranscriptFacts {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return facts }
+    defer { try? h.close() }
+    let size = (try? h.seekToEnd()) ?? 0
+    var f = size < facts.offset ? TranscriptFacts() : facts  // rewritten: start over
+    try? h.seek(toOffset: f.offset)
+    let data = h.readDataToEndOfFile()
+    guard let end = data.lastIndex(of: UInt8(ascii: "\n")) else { return f }  // only whole lines
+    let chunk = String(decoding: data[data.startIndex...end], as: UTF8.self)
+    f.offset += UInt64(end - data.startIndex + 1)
+    if let r = chunk.range(of: #""gitBranch":"([^"]+)""#, options: [.regularExpression, .backwards]) {
+        f.branch = String(chunk[r].dropFirst(#""gitBranch":""#.count).dropLast())
+    }
+    for line in chunk.split(separator: "\n") where line.contains("\"tool_use\"") && (line.contains("gh pr ") || line.contains("git ")) {
+        guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+        f.add(commands(inEntry: o))
+    }
+    return f
+}
+
 // Who wrote a transcript, from its first lines: "cli" is an interactive terminal run,
 // "claude-desktop" the desktop app. Desktop transcripts share the folder and are skipped.
 func transcriptEntrypoint(_ url: URL) -> String? {
@@ -55,6 +162,7 @@ func transcriptEntrypoint(_ url: URL) -> String? {
 func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session? {
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
     var title: String?, first: String?, firstCommand: String?, lastPrompt: String?, cwd: String?, branch: String?
+    var facts = TranscriptFacts()
     func tag(_ name: String, _ s: String) -> String? {
         guard let a = s.range(of: "<\(name)>"), let b = s.range(of: "</\(name)>"), a.upperBound <= b.lowerBound else { return nil }
         return String(s[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,6 +171,7 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         if cwd == nil { cwd = o["cwd"] as? String }
         if let b = o["gitBranch"] as? String, !b.isEmpty { branch = b }
+        facts.add(commands(inEntry: o))
         switch o["type"] as? String {
         case "custom-title": title = o["customTitle"] as? String ?? title
         case "last-prompt": lastPrompt = o["lastPrompt"] as? String ?? lastPrompt
@@ -87,7 +196,8 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         status: nil,
         detail: (lastPrompt ?? first).map { "Last prompt: " + clip($0) },
         needs: nil, scheduledTaskId: nil, prs: [], archived: false, deleted: false,
-        branch: branch, startedAt: created)
+        branch: branch, startedAt: created, gitBranch: branch, workBranches: facts.branches,
+        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed)
 }
 
 // How long a session has run, start to last activity: "45m", "3h 20m", "2d 4h".

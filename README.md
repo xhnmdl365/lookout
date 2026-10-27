@@ -41,6 +41,23 @@ A task is marked done without you when there's hard evidence:
 
 Anything marked automatically can be undone, and won't be marked again.
 
+### How it tells what a task is
+
+None of this depends on how you name sessions; it looks at what each session did.
+
+- **Its ticket** comes from the session's title, else the branch it last checked out or pushed,
+  else the branch or title of a PR you opened that it mentions. Keys found in branch names count
+  only once Jira knows them, so `release-2024` isn't mistaken for a ticket. When several
+  sessions share a folder, its current branch belongs to none of them in particular, so only a
+  branch a session switched to or pushed is its own.
+- **A team code review** is a session that ran `gh pr checkout` or `gh pr review` on a
+  teammate's PR; or diffed or mentions a teammate's PR that GitHub lists you as a reviewer on;
+  or talks of a review next to a teammate's PR. A session that pushed a branch or opened a PR is
+  your own work, and so is one titled with a ticket key that doesn't mention a review.
+
+When it gets one wrong, right-click the task: set whether it's a code review or your own work,
+and set or clear its ticket. Your choice wins over anything detected.
+
 ### Triage
 
 **Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. The panel
@@ -98,8 +115,8 @@ its menu bar icon) to bring it back.
 
 In Settings you can add a short rule to your own `~/.claude/CLAUDE.md` that has Claude name a
 session reviewing a teammate's PR "Team code review: …". The panel then recognises review
-sessions at once. Without the rule they're still found, by the PR's author. The rule is added
-between markers, and Settings can remove it again.
+sessions at once, even before Claude runs any `gh` command. Without the rule they're still found
+from what the session did. The rule is added between markers, and Settings can remove it again.
 
 ## Your own settings
 

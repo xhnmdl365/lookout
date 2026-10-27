@@ -57,6 +57,21 @@ func namedTeamReview(_ title: String) -> Bool {
 // only in the status (another team's ticket, say) aren't the task's own.
 func ticketKey(_ title: String) -> String? { captures(#"\b([A-Z][A-Z0-9]+-\d+)\b"#, in: title).first?[1] }
 
+// Jira-looking keys in a branch name, where they're often lower case: "feature/proj-123-login".
+// Only a guess: a key counts once Jira knows it.
+func branchTicketKeys(_ branch: String) -> [String] {
+    captures(#"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]{1,9}-\d+)(?![0-9])"#, in: branch).map { $0[1].uppercased() }
+}
+
+// A PR ref from a gh command as a URL: "owner/repo#12", or "#12" in the session's own repo.
+func resolveReviewRef(_ ref: String, repo: String?) -> String? {
+    if ref.hasPrefix("http") { return captures(#"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)"#, in: ref).first
+        .map { "https://github.com/\($0[1])/\($0[2])/pull/\($0[3])" } }
+    let parts = ref.split(separator: "#", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 2, let n = Int(parts[1]), let r = parts[0].isEmpty ? repo : parts[0] else { return nil }
+    return "https://github.com/\(r)/pull/\(n)"
+}
+
 // A work item's status from `acli jira workitem view --json`: its name, whether Jira files it
 // under Done, and when it last changed category. Found by key name, wherever acli nests it.
 func parseTicket(_ out: String) -> (status: String, done: Bool, changedAt: Double?)? {
@@ -106,43 +121,96 @@ extension Store {
         return known.contains { $0.state == "MERGED" } ? "Team review: PR \(nums) merged" : "Team review: PR \(nums) closed"
     }
 
+    // Where a task's ticket may be named, best first: its title, its branches, then its own PRs'
+    // branches and titles. Branch and PR keys are guesses until Jira confirms them.
+    // Sessions sharing a folder share its branch and the PR the Claude app links to it, so those
+    // count only for a session in its own worktree; elsewhere only branches the session checked
+    // out or pushed, and PRs it names or looked at, are its own.
+    func ticketCandidates(_ s: Session) -> [String] {
+        var keys = [ticketKey(s.title)].compactMap { $0 }
+        // The latest branch first: a session that moved on to another ticket is about that one.
+        keys += ((s.runCwd != s.cwd ? [s.gitBranch].compactMap { $0 } : []) + s.workBranches.reversed()).flatMap(branchTicketKeys)
+        for url in ownPRs(s, textRefs[s.id] ?? []) {
+            guard let pr = prLive[url], let me, pr.author == me else { continue }
+            keys += (pr.branch.map(branchTicketKeys) ?? []) + [pr.title.flatMap(ticketKey)].compactMap { $0 }
+        }
+        var seen = Set<String>()
+        return keys.filter { seen.insert($0).inserted }
+    }
+
+    // The ticket a task is about: the user's own say first, then the first candidate Jira knows,
+    // else the title's key. Team code reviews have none: the PR under review decides those.
+    func ticket(for s: Session) -> String? {
+        if let k = manual.ticketOverrides?[s.id] { return k.isEmpty ? nil : k }
+        guard !teamReviews.contains(s.id) else { return nil }
+        let keys = ticketCandidates(s)
+        return keys.first { tickets[$0] != nil } ?? ticketKey(s.title)
+    }
+
     // Own work on a ticket: Jira decides. Done once the ticket is in Jira's Done category and the
     // session hasn't been worked in since it got there.
     func ticketEvidence(_ s: Session) -> String? {
-        guard !teamReviews.contains(s.id), let key = ticketKey(s.title), let t = tickets[key], t.done else { return nil }
+        guard let key = ticket(for: s), let t = tickets[key], t.done else { return nil }
         if let c = t.changedAt, s.lastActivity.timeIntervalSince1970 > c + prGraceHours * 3600 { return nil }
         return "Ticket \(key) \(t.status)"
     }
 
     // Whether Jira, not PRs, settles this task: own work whose ticket acli could read.
-    func ticketDecides(_ s: Session) -> Bool {
-        !teamReviews.contains(s.id) && ticketKey(s.title).flatMap { tickets[$0] } != nil
-    }
+    func ticketDecides(_ s: Session) -> Bool { ticket(for: s).flatMap { tickets[$0] } != nil }
 
-    // The ticket's current status, for the footer line of own work.
+    // The ticket's current status, for the footer line of own work; with its key when the title
+    // doesn't already show it.
     func ticketStatus(_ s: Session) -> String? {
-        guard !teamReviews.contains(s.id), let key = ticketKey(s.title) else { return nil }
-        return tickets[key]?.status
+        guard let key = ticket(for: s), let status = tickets[key]?.status else { return nil }
+        return s.title.contains(key) ? status : "\(key) \(status)"
     }
 
     private func reviewText(_ s: Session) -> String { [s.title, s.detail ?? "", s.needs ?? ""].joined(separator: "\n") }
 
-    // Which PRs each open task names, and which tasks are team code reviews.
+    // The PRs among `urls` that are the session's own doing: all of them in its own worktree;
+    // elsewhere, not the folder's PR the Claude app links to every session there.
+    func ownPRs(_ s: Session, _ urls: [String]) -> [String] {
+        s.runCwd != s.cwd ? urls : urls.filter { u in !s.prs.contains { $0.url == u } }
+    }
+
+    // PRs the session checked out or reviewed with gh, as URLs; with `diffs`, also those it diffed.
+    func reviewedPRs(_ s: Session, repos: [String: String?], diffs: Bool = false) -> [String] {
+        (s.reviewRefs + (diffs ? s.diffRefs : [])).compactMap { resolveReviewRef($0, repo: repos[s.cwd] ?? nil) }
+    }
+
+    // Every PR a task touches: linked by the app, named in its text, or looked at with gh.
+    func taskPRs(_ s: Session, repos: [String: String?]) -> [String] {
+        let named = prRefs(in: reviewText(s), repo: repos[s.cwd] ?? nil, defaultOwner: config.githubOrg ?? commonOwner(repos))
+        var seen = Set<String>()
+        return (s.prs.map(\.url) + named + reviewedPRs(s, repos: repos, diffs: true)).filter { seen.insert($0).inserted }
+    }
+
+    // Which PRs each open task touches, and which tasks are team code reviews. A review is
+    // told by what the session did, not what it's called: the user's own say first; then a
+    // "Team code review" title. A session that pushed a branch or opened a PR is the user's own
+    // work, as is one titled with a ticket and no word of a review. Otherwise it's a review when
+    // it checked out or reviewed a teammate's PR with gh; or diffed or names a teammate's PR that
+    // GitHub lists the user as a reviewer on; or, last, talks of a review next to a teammate's PR.
     func updateReviews(_ all: [Session]) {
         var refs: [String: [String]] = [:], team = Set<String>()
+        let overrides = manual.kindOverrides ?? [:]
         for s in all where !s.archived && !s.deleted && s.scheduledTaskId == nil {
-            // Named by convention ("Team code review: …"): certain, no PR lookup needed.
-            let named = namedTeamReview(s.title)
-            if named { team.insert(s.id) }
-            let r = Array(Set(s.prs.map(\.url) + prRefs(in: reviewText(s), repo: repoByCwd[s.cwd] ?? nil,
-                                                       defaultOwner: config.githubOrg ?? commonOwner(repoByCwd))))
-            guard !r.isEmpty else { continue }
-            refs[s.id] = r
-            // Otherwise guessed, for sessions named before the convention: talk of a review
-            // plus a PR by someone else.
-            let authors = r.compactMap { prLive[$0]?.author }
-            if !named, let me, reviewText(s).range(of: "review", options: .caseInsensitive) != nil,
-               authors.contains(where: { $0 != me }) { team.insert(s.id) }
+            let r = taskPRs(s, repos: repoByCwd)
+            if !r.isEmpty { refs[s.id] = r }
+            if let o = overrides[s.id] {
+                if o == "review" { team.insert(s.id) }
+                continue
+            }
+            if namedTeamReview(s.title) { team.insert(s.id); continue }
+            let titledOwn = ticketKey(s.title) != nil && s.title.range(of: "review", options: .caseInsensitive) == nil
+            guard let me, !s.pushed, !titledOwn else { continue }
+            let theirs = { (url: String) in self.prLive[url]?.author.map { $0 != me } ?? false }
+            let asked = { (url: String) in theirs(url) && self.prLive[url]?.reviewers.contains(me) == true }
+            if reviewedPRs(s, repos: repoByCwd).contains(where: theirs)
+                || (ownPRs(s, r) + reviewedPRs(s, repos: repoByCwd, diffs: true)).contains(where: asked)
+                || (reviewText(s).range(of: "review", options: .caseInsensitive) != nil && r.contains(where: theirs)) {
+                team.insert(s.id)
+            }
         }
         textRefs = refs
         teamReviews = team
@@ -155,44 +223,64 @@ extension Store {
         let open = sessions.filter { !$0.archived && !$0.deleted && !isDone($0) && !isOnHold($0) && $0.scheduledTaskId == nil }
         let folders = Set(open.map(\.cwd)).filter { repoByCwd[$0] == nil }
         let live = prLive, knownRepos = repoByCwd, needMe = me == nil
-        // Own work's tickets, read with the Atlassian CLI when it is installed; their status can
-        // move either way, so every one is read again each time.
-        let keys = Set(open.filter { !teamReviews.contains($0.id) }.compactMap { ticketKey($0.title) })
+        // Own work's ticket candidates; keys from PRs gh is about to read are added below.
+        let ownWork = open.filter { manual.ticketOverrides?[$0.id] == nil && !teamReviews.contains($0.id) }
+        let knownKeys = Set(open.compactMap { manual.ticketOverrides?[$0.id] }.filter { !$0.isEmpty }
+                            + ownWork.flatMap(ticketCandidates))
+        let skip = ticketMissing, knownMe = me
         let gh = Tools.gh, acliPath = Tools.acli  // either may be missing; its checks are then skipped
         DispatchQueue.global(qos: .utility).async {
-            var foundTickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]
-            if let acli = acliPath {
-                for k in keys {
-                    let out = shell(acli, ["jira", "workitem", "view", k, "--json", "--fields", "status,statuscategorychangedate"])
-                    if let t = parseTicket(out) { foundTickets[k] = t } else { log("acli: no status for \(k)") }
-                }
-                log("acli: read \(foundTickets.count) of \(keys.count) tickets: \(foundTickets.keys.sorted().joined(separator: " "))")
-            }
             var repos = knownRepos
             for f in folders { repos[f] = .some(githubRepo(of: f)) }
             let login = needMe ? gh.map { shell($0, ["api", "user", "-q", ".login"]).trimmingCharacters(in: .whitespacesAndNewlines) } : nil
-            let owner = config.githubOrg ?? commonOwner(repos)
-            let urls = Set(open.flatMap { s in
-                s.prs.map(\.url) + prRefs(in: [s.title, s.detail ?? "", s.needs ?? ""].joined(separator: "\n"),
-                                          repo: repos[s.cwd] ?? nil, defaultOwner: owner)
-            }).filter { gh != nil && (live[$0] == nil || live[$0]?.state == "OPEN") }
-            var found: [String: (state: String, endedAt: Double?, author: String?)] = [:]
+            let urls = Set(open.flatMap { self.taskPRs($0, repos: repos) })
+                .filter { gh != nil && (live[$0] == nil || live[$0]?.state == "OPEN") }
+            var found: [String: PRInfo] = [:]
             let iso = ISO8601DateFormatter()
             for u in urls {
-                guard let gh, let out = run(gh, ["pr", "view", u, "--json", "state,mergedAt,closedAt,author"]),
+                guard let gh, let out = run(gh, ["pr", "view", u, "--json",
+                                                 "state,mergedAt,closedAt,author,headRefName,title,reviewRequests,latestReviews"]),
                       let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
                       let state = o["state"] as? String else {
-                    found[u] = ("UNKNOWN", nil, nil)
+                    found[u] = PRInfo(state: "UNKNOWN")
                     continue
                 }
                 let end = (o["mergedAt"] as? String).flatMap(iso.date) ?? (o["closedAt"] as? String).flatMap(iso.date)
-                found[u] = (state, end?.timeIntervalSince1970, (o["author"] as? [String: Any])?["login"] as? String)
+                let loginOf = { (d: Any?) in (d as? [String: Any])?["login"] as? String }
+                let requested = (o["reviewRequests"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
+                let reviewed = (o["latestReviews"] as? [[String: Any]] ?? []).compactMap { loginOf($0["author"]) }
+                found[u] = PRInfo(state: state, endedAt: end?.timeIntervalSince1970, author: loginOf(o["author"]),
+                                  branch: o["headRefName"] as? String, title: o["title"] as? String,
+                                  reviewers: Set(requested + reviewed))
+            }
+            // Tickets, read with the Atlassian CLI when it is installed. Their status can move
+            // either way, so every one is read again each time; keys Jira doesn't know are dropped.
+            var keys = knownKeys
+            if let me = knownMe ?? login {
+                for s in ownWork {
+                    for u in self.ownPRs(s, self.taskPRs(s, repos: repos)) {
+                        guard let pr = found[u] ?? live[u], pr.author == me else { continue }
+                        keys.formUnion((pr.branch.map(branchTicketKeys) ?? []) + [pr.title.flatMap(ticketKey)].compactMap { $0 })
+                    }
+                }
+            }
+            keys.subtract(skip)
+            var foundTickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]
+            var missing = Set<String>()
+            if let acli = acliPath {
+                for k in keys {
+                    let out = shell(acli, ["jira", "workitem", "view", k, "--json", "--fields", "status,statuscategorychangedate"])
+                    if let t = parseTicket(out) { foundTickets[k] = t } else { missing.insert(k); log("acli: no status for \(k)") }
+                }
+                log("acli: read \(foundTickets.count) of \(keys.count) tickets: \(foundTickets.keys.sorted().joined(separator: " "))")
             }
             DispatchQueue.main.async {
                 self.repoByCwd = repos
                 if let login, !login.isEmpty { self.me = login }
                 self.prLive.merge(found) { _, new in new }
                 self.tickets.merge(foundTickets) { _, new in new }
+                self.ticketMissing.formUnion(missing)
+                self.updateReviews(self.sessions)  // authors and reviewers just came in
                 then?()
                 self.reload()
             }

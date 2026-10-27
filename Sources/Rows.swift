@@ -198,6 +198,31 @@ struct Row: View {
                            tint: done ? Palette.needsYou : Palette.done) { store.toggleDone(s) }
             }
         }
+        .contextMenu {
+            if !s.deleted && s.scheduledTaskId == nil { corrections }
+        }
+    }
+
+    // Right-click: set straight what the panel got wrong about a task.
+    @ViewBuilder private var corrections: some View {
+        Picker("This task is", selection: Binding(get: { store.kindOverride(s) ?? "auto" },
+                                                  set: { store.setKind(s, $0 == "auto" ? nil : $0) })) {
+            Text(store.kindOverride(s) == nil ? "Detected: " + (teamReview ? "a code review" : "my own work")
+                                              : "Detect automatically").tag("auto")
+            Text("A code review of a teammate's PR").tag("review")
+            Text("My own work").tag("own")
+        }
+        .pickerStyle(.inline)
+        Divider()
+        let detected = store.ticketOverride(s) == nil
+        Button(store.ticket(for: s).map { "Ticket: \($0)…" } ?? "Set ticket…") {
+            if let key = askTicket(current: store.ticket(for: s)) { store.setTicket(s, key) }
+        }
+        if !detected {
+            Button("Detect ticket automatically") { store.setTicket(s, nil) }
+        } else if store.ticket(for: s) != nil {
+            Button("No ticket") { store.setTicket(s, "") }
+        }
     }
 
     private var meta: String {
@@ -206,6 +231,23 @@ struct Row: View {
         let carried = s.lastActivity < Calendar.current.startOfDay(for: Date()) && !store.isDone(s) ? " · carried over" : ""
         return "\(where_) · \(relative(s.lastActivity))\(carried)"
     }
+}
+
+// Asks for a task's Jira key; nil when cancelled, "" for no ticket.
+func askTicket(current: String?) -> String? {
+    NSApp.activate(ignoringOtherApps: true)
+    let a = NSAlert()
+    a.messageText = "Ticket for this task"
+    a.informativeText = "Its Jira key, like PROJ-123. Leave it empty for no ticket."
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+    field.stringValue = current ?? ""
+    field.placeholderString = "PROJ-123"
+    a.accessoryView = field
+    a.addButton(withTitle: "Save")
+    a.addButton(withTitle: "Cancel")
+    a.window.initialFirstResponder = field
+    guard a.runModal() == .alertFirstButtonReturn else { return nil }
+    return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 }
 
 struct SuggestionCallout: View {
