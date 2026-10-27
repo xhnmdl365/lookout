@@ -1,0 +1,162 @@
+// Sessions, marks, verdicts and day snapshots, plus date formatting.
+import SwiftUI
+import AppKit
+
+// Mark reasons the rules match on.
+let reasonManual = "Manual"
+let reasonArchived = "Archived"
+let reasonDeleted = "Deleted"
+
+struct PR: Hashable {
+    let url: String
+    let number: Int
+    let state: String
+}
+
+struct Session: Identifiable, Equatable {
+    let id: String
+    let cliId: String?
+    let title: String
+    let cwd: String     // the repo the session belongs to (a worktree's origin)
+    let runCwd: String  // where it actually ran
+    let lastActivity: Date
+    let status: String?
+    let detail: String?
+    let needs: String?
+    let scheduledTaskId: String?
+    let prs: [PR]
+    let archived: Bool
+    let deleted: Bool
+    var branch: String? = nil  // terminal sessions: the git branch they were on
+    var parentId: String? = nil  // desktop sessions started from another session (shown nested under it)
+    var startedAt: Date? = nil
+    var pendingAsk: String? = nil  // a question the session's last turn left for the user, still unanswered
+
+    // Waiting on the user: the app's own summary says blocked, or the last turn asked something.
+    var waiting: Bool { status == "blocked" || pendingAsk != nil }
+    var nextStep: String? { needs.flatMap { $0.isEmpty ? nil : $0 } ?? pendingAsk }
+
+    var age: TimeInterval { Date().timeIntervalSince(lastActivity) }
+
+    // A `claude` run in a terminal rather than the desktop app; its id is "cli_<session uuid>".
+    var isTerminal: Bool { id.hasPrefix("cli_") }
+
+    var project: String { projectName(cwd) }
+}
+
+func projectName(_ cwd: String) -> String {
+    cwd.contains("/scratch-workspaces/") ? "No folder" : (cwd as NSString).lastPathComponent
+}
+
+struct Mark: Codable {
+    var at: Double
+    var reason: String
+    var auto: Bool
+}
+
+struct Known: Codable, Equatable {
+    var title: String
+    var cwd: String
+}
+
+// The only state we own.
+struct Manual: Codable {
+    var doneAt: [String: Double] = [:]  // v1 manual marks, migrated into `marks`
+    var marks: [String: Mark]? = [:]
+    var pinned: Set<String>? = []
+    var dismissed: Set<String>? = []    // auto marks undone ("<id>") and suggestions ignored ("s:<id>")
+    var known: [String: Known]? = [:]   // sessions seen open, so archive/delete can close them
+    var onHold: [String: Double]? = [:] // id -> when the user put it on hold
+}
+
+struct Verdict: Codable {
+    let id: String
+    let verdict: String  // done | suggest_done | active
+    let reason: String
+    let endedAt: String?  // done: when the evidence PRs were last merged or closed
+    var at: Double?       // when Claude gave it; verdicts carried over from earlier runs keep theirs
+
+    // A verdict speaks for the session as it was then; work since makes it stale.
+    func current(for s: Session, runAt: Double) -> Bool { s.lastActivity.timeIntervalSince1970 <= (at ?? runAt) }
+
+    // A done verdict only counts if the session stopped when the PRs landed.
+    func holds(lastActivity: Date) -> Bool {
+        guard verdict == "done", let e = endedAt.flatMap(ISO8601DateFormatter().date) else { return false }
+        return lastActivity.timeIntervalSince(e) <= prGraceHours * 3600
+    }
+}
+
+struct JudgeFile: Codable {
+    var generatedAt: Double
+    var verdicts: [Verdict]
+    var error: String?
+}
+
+// One background Claude run, as the CLI reported it. costUSD is the CLI's API-price
+// equivalent; on a claude.ai subscription login the run counts against plan limits instead.
+struct JudgeRun: Codable {
+    var at: Double
+    var durationMs: Double
+    var costUSD: Double
+    var tokensIn: Int   // input + cache writes + cache reads
+    var tokensOut: Int
+    var turns: Int
+    var ok: Bool
+    var kind: String?  // nil: judge; "summary": day summary
+
+    init(at: Double, raw: [String: Any]?) {
+        let u = raw?["usage"] as? [String: Any] ?? [:]
+        func n(_ k: String) -> Int { u[k] as? Int ?? 0 }
+        self.at = at
+        durationMs = raw?["duration_ms"] as? Double ?? 0
+        costUSD = raw?["total_cost_usd"] as? Double ?? 0
+        tokensIn = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
+        tokensOut = n("output_tokens")
+        turns = raw?["num_turns"] as? Int ?? 0
+        ok = (raw?["is_error"] as? Bool) == false
+    }
+}
+
+// A task as it stood on one day.
+struct SnapTask: Codable, Identifiable {
+    var id: String
+    var title: String
+    var project: String
+    var section: String  // needsYou | active | idle | onHold | done
+    var detail: String?
+    var needs: String?
+    var doneReason: String?
+    var lastActivity: Double
+    var deleted: Bool
+}
+
+struct DaySnapshot: Codable {
+    var day: String  // yyyy-MM-dd
+    var updatedAt: Double
+    var tasks: [SnapTask]
+    var summary: String?
+    var summaryAt: Double?
+    var summaryEdited: Bool?
+    var userDone: [String: Bool]?  // the user's later corrections to this day
+
+    func isDone(_ t: SnapTask) -> Bool { userDone?[t.id] ?? (t.section == "done") }
+}
+
+func dayKey(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f.string(from: date)
+}
+
+func dayDate(_ key: String) -> Date {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f.date(from: key) ?? Date()
+}
+
+func relative(_ date: Date) -> String {
+    let f = RelativeDateTimeFormatter()
+    f.locale = english
+    f.unitsStyle = .short
+    return f.localizedString(for: date, relativeTo: Date())
+}
