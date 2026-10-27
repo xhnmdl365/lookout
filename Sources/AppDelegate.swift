@@ -3,9 +3,14 @@ import SwiftUI
 import AppKit
 
 // The panel floats beside whatever app the user works in, so a click on it should act at once,
-// not just bring it forward and wait for a second click.
-final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+// not just bring it forward and wait for a second click. Views decide that one by one, and the
+// ones SwiftUI makes inside a scroll view say no; becoming key before the click is handled
+// makes it an ordinary click for all of them.
+final class FloatingPanel: NSPanel {
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown || event.type == .rightMouseDown, !isKeyWindow { makeKey() }
+        super.sendEvent(event)
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -99,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.items.forEach { $0.target = self }
         statusItem.menu = menu
 
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 600),
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 600),
                         styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         panel.title = "Claude Tasks"
@@ -110,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         store = Store()
-        panel.contentView = FirstClickHostingView(rootView: ContentView(store: store))
+        panel.contentView = NSHostingView(rootView: ContentView(store: store))
         if !panel.setFrameUsingName("ClaudeTasksPanel"), let f = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: f.maxX - 380, y: f.maxY - 620))
         }
