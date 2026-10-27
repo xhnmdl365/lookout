@@ -2,9 +2,20 @@
 import SwiftUI
 import AppKit
 
+// Compiled patterns, kept: rows look up tickets and PRs on every redraw. NSCache is thread-safe,
+// and PR refreshes run off the main thread.
+private let regexCache = NSCache<NSString, NSRegularExpression>()
+
 // Each match's capture groups (index 0 is the whole match).
 func captures(_ pattern: String, in s: String) -> [[String]] {
-    guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let re: NSRegularExpression
+    if let cached = regexCache.object(forKey: pattern as NSString) {
+        re = cached
+    } else {
+        guard let made = try? NSRegularExpression(pattern: pattern) else { return [] }
+        regexCache.setObject(made, forKey: pattern as NSString)
+        re = made
+    }
     return re.matches(in: s, range: NSRange(s.startIndex..., in: s)).map { m in
         (0..<m.numberOfRanges).map { i in Range(m.range(at: i), in: s).map { String(s[$0]) } ?? "" }
     }

@@ -4,10 +4,23 @@ import AppKit
 
 final class Store: ObservableObject {
     @Published var sessions: [Session] = [] {
-        didSet { byId = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
+        didSet {
+            byId = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            derived = nil
+        }
     }
     private var byId: [String: Session] = [:]
-    @Published var manual = Manual()
+    @Published var manual = Manual() { didSet { derived = nil } }
+    // What every row asks about the list as a whole (open tasks, children, sections), worked out
+    // once per change instead of once per row. Cleared when sessions or marks change, and each minute.
+    private var derived: Derived?
+    private struct Derived {
+        var open: [Session]
+        var children: [String: [Session]]
+        var terminalShare: Double
+        var sections: [String: [Session]] = [:]
+    }
+    private var lastTick = Date()
     @Published var judge: JudgeFile?
     @Published var judging = false
     @Published var triageNote: String?  // a short-lived word on the last Triage click
@@ -95,13 +108,13 @@ final class Store: ObservableObject {
                     guard let u = p["url"] as? String else { return nil }
                     return PR(url: u, number: p["prNumber"] as? Int ?? 0, state: p["state"] as? String ?? "")
                 }
-                let runCwd = d["cwd"] as? String ?? ""
+                let runCwd = native(d["cwd"] as? String ?? "")
                 let session = Session(
-                    id: url.deletingPathExtension().lastPathComponent,
-                    cliId: d["cliSessionId"] as? String,
+                    id: native(url.deletingPathExtension().lastPathComponent),
+                    cliId: (d["cliSessionId"] as? String).map(native),
                     title: d["title"] as? String ?? "(untitled)",
                     // originCwd is the repo a worktree session was started from.
-                    cwd: d["originCwd"] as? String ?? runCwd,
+                    cwd: (d["originCwd"] as? String).map(native) ?? runCwd,
                     runCwd: runCwd,
                     lastActivity: Date(timeIntervalSince1970: ((d["lastActivityAt"] as? Double) ?? 0) / 1000),
                     status: summary?["status_category"] as? String,
@@ -111,7 +124,7 @@ final class Store: ObservableObject {
                     prs: prs,
                     archived: (d["isArchived"] as? Bool) == true,
                     deleted: false,
-                    parentId: (d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String,
+                    parentId: ((d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String).map(native),
                     startedAt: (d["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
                 self.sessionCache[url.path] = (mtime, session)
                 out.append(self.withPendingAsk(session))
@@ -137,6 +150,13 @@ final class Store: ObservableObject {
         if !sessions.isEmpty, let id = try? String(contentsOf: openTrigger, encoding: .utf8) {
             try? FileManager.default.removeItem(at: openTrigger)
             open(id.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        // Once a minute the list redraws even when nothing changed, so "5 min. ago" and the
+        // sections that go by age keep up.
+        if Date().timeIntervalSince(lastTick) >= 60 {
+            lastTick = Date()
+            derived = nil
+            objectWillChange.send()
         }
         if !sessions.isEmpty, Date().timeIntervalSince(lastPrRefresh) > prRefreshMinutes * 60 {
             lastPrRefresh = Date()
@@ -252,8 +272,10 @@ final class Store: ObservableObject {
         }
         // Tracked sessions whose file is gone were deleted.
         for (id, k) in known where !ids.contains(id) {
+            // When the app left no deletion time, the time it was first found gone, kept in its
+            // mark; "now" on every pass would make it look changed on every refresh.
             let ms = deletedAt[String(id.dropFirst("local_".count))] ?? 0
-            let at = ms > 0 ? ms / 1000 : now
+            let at = ms > 0 ? ms / 1000 : marks[id]?.at ?? now
             all.append(Session(id: id, cliId: nil, title: k.title, cwd: k.cwd, runCwd: k.cwd,
                                lastActivity: Date(timeIntervalSince1970: at), status: nil, detail: nil,
                                needs: nil, scheduledTaskId: nil, prs: [], archived: false, deleted: true))
@@ -281,12 +303,13 @@ final class Store: ObservableObject {
         }
 
         // Changes found by a refresh (a merged PR, a ticket gone Done, a new task) ease in too.
+        // Unchanged data is left alone, so a quiet refresh redraws nothing.
         withAnimation(Motion.refresh) {
-            let changed = (manual.known ?? [:]) != known || (manual.marks ?? [:]).count != marks.count
-            manual.known = known
-            manual.marks = marks
-            if changed { save() }
-            // Unchanged data leaves the list alone, so a quiet refresh redraws nothing.
+            if (manual.known ?? [:]) != known || (manual.marks ?? [:]) != marks {
+                manual.known = known
+                manual.marks = marks
+                save()
+            }
             let next = all.filter { !$0.archived || known[$0.id] != nil }
             if next != sessions { sessions = next }
         }
@@ -416,9 +439,16 @@ final class Store: ObservableObject {
 
     // MARK: Sections
 
-    private var openTasks: [Session] {
-        sessions.filter { $0.scheduledTaskId == nil && !$0.archived && !$0.deleted && !isDone($0) }
+    private var cache: Derived {
+        if let d = derived { return d }
+        let open = sessions.filter { $0.scheduledTaskId == nil && !$0.archived && !$0.deleted && !isDone($0) }
+        let d = Derived(open: open,
+                        children: Dictionary(grouping: open.filter { $0.parentId != nil }, by: { $0.parentId! }),
+                        terminalShare: open.isEmpty ? 0 : Double(open.filter(\.isTerminal).count) / Double(open.count))
+        derived = d
+        return d
     }
+    private var openTasks: [Session] { cache.open }
     private func recent(_ s: Session) -> Bool { s.age <= activeHours * 3600 || isPinned(s) }
     private func within(_ s: Session, days: Double) -> Bool { s.age <= days * 86400 }
 
@@ -437,13 +467,20 @@ final class Store: ObservableObject {
         return baseSection(parent) != nil
     }
 
-    func children(of s: Session) -> [Session] { openTasks.filter { $0.parentId == s.id } }
+    func children(of s: Session) -> [Session] { cache.children[s.id] ?? [] }
 
     // A section's top-level tasks, newest first. A task with children sorts by its family's
     // newest activity, so a child's fresh progress lifts the whole family. And when a child is
     // waiting on the user, its whole family moves up to "Needs you" (from In progress or Idle;
     // a family the user put on hold stays there).
     private func top(_ section: String) -> [Session] {
+        if let done = cache.sections[section] { return done }
+        let found = computeTop(section)
+        derived?.sections[section] = found
+        return found
+    }
+
+    private func computeTop(_ section: String) -> [Session] {
         var newestChild: [String: Date] = [:], childWaits = Set<String>()
         for c in openTasks {
             guard let p = c.parentId else { continue }
@@ -483,9 +520,8 @@ final class Store: ObservableObject {
     // most open tasks come from goes quiet, so the rarer one stands out; when neither is rare
     // (the smaller side is a third or more), both keep their pills.
     func badgeIsQuiet(terminal: Bool) -> Bool {
-        let open = openTasks
-        guard !open.isEmpty else { return false }
-        let terminalShare = Double(open.filter(\.isTerminal).count) / Double(open.count)
+        guard !openTasks.isEmpty else { return false }
+        let terminalShare = cache.terminalShare
         if terminalShare < 1.0 / 3 { return !terminal }
         if terminalShare > 2.0 / 3 { return terminal }
         return false

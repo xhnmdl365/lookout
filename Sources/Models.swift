@@ -59,11 +59,20 @@ struct Session: Identifiable, Equatable {
     var project: String { projectName(cwd) }
 }
 
+// A string stored as Swift's own UTF-8. File names and JSONSerialization values arrive as
+// bridged NSStrings, which make every dictionary lookup and comparison by them slow; ids and
+// folders are looked up on every redraw.
+func native(_ s: String) -> String {
+    var s = s
+    s.makeContiguousUTF8()
+    return s
+}
+
 func projectName(_ cwd: String) -> String {
     cwd.contains("/scratch-workspaces/") ? "No folder" : (cwd as NSString).lastPathComponent
 }
 
-struct Mark: Codable {
+struct Mark: Codable, Equatable {
     var at: Double
     var reason: String
     var auto: Bool

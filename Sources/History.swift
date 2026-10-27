@@ -11,15 +11,18 @@ extension Store {
         (try? Data(contentsOf: snapshotURL(day))).flatMap { try? JSONDecoder().decode(DaySnapshot.self, from: $0) }
     }
 
-    private func saveSnapshot(_ snap: DaySnapshot) {
+    // `notify` redraws views showing the day; today's own snapshot, rewritten as the live list
+    // moves, has none on screen, so writing it doesn't redraw the list.
+    private func saveSnapshot(_ snap: DaySnapshot, notify: Bool = true) {
         try? JSONEncoder().encode(snap).write(to: snapshotURL(snap.day))
         refreshDays()
-        objectWillChange.send()
+        if notify { objectWillChange.send() }
     }
 
     func refreshDays() {
-        days = ((try? FileManager.default.contentsOfDirectory(atPath: daysDir.path)) ?? [])
+        let found = ((try? FileManager.default.contentsOfDirectory(atPath: daysDir.path)) ?? [])
             .filter { $0.hasSuffix(".json") }.map { String($0.dropLast(5)) }.sorted()
+        if found != days { days = found }
     }
 
     // Only today's file is ever rewritten from live data, so past days stay as they were.
@@ -39,7 +42,7 @@ extension Store {
         var file = loadSnapshot(day) ?? DaySnapshot(day: day, updatedAt: 0, tasks: [])
         file.tasks = tasks
         file.updatedAt = Date().timeIntervalSince1970
-        saveSnapshot(file)
+        saveSnapshot(file, notify: false)
     }
 
     // The user's corrections to a day; a value matching the snapshot drops the correction.

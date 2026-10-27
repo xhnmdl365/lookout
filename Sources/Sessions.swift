@@ -131,16 +131,21 @@ func scanTranscript(_ url: URL, from facts: TranscriptFacts) -> TranscriptFacts 
     let size = (try? h.seekToEnd()) ?? 0
     var f = size < facts.offset ? TranscriptFacts() : facts  // rewritten: start over
     try? h.seek(toOffset: f.offset)
-    let data = h.readDataToEndOfFile()
-    guard let end = data.lastIndex(of: UInt8(ascii: "\n")) else { return f }  // only whole lines
-    let chunk = String(decoding: data[data.startIndex...end], as: UTF8.self)
-    f.offset += UInt64(end - data.startIndex + 1)
-    if let r = chunk.range(of: #""gitBranch":"([^"]+)""#, options: [.regularExpression, .backwards]) {
-        f.branch = String(chunk[r].dropFirst(#""gitBranch":""#.count).dropLast())
-    }
-    for line in chunk.split(separator: "\n") where line.contains("\"tool_use\"") && (line.contains("gh pr ") || line.contains("git ")) {
-        guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
-        f.add(commands(inEntry: o))
+    // A few megabytes at a time, whole lines only: some transcripts run to tens of megabytes.
+    var carry = Data()
+    while let block = try? h.read(upToCount: 4 << 20), !block.isEmpty {
+        let data = carry + block
+        guard let end = data.lastIndex(of: UInt8(ascii: "\n")) else { carry = data; continue }
+        let chunk = String(decoding: data[...end], as: UTF8.self)
+        f.offset += UInt64(end + 1)
+        carry = Data(data[(end + 1)...])
+        if let r = chunk.range(of: #""gitBranch":"([^"]+)""#, options: [.regularExpression, .backwards]) {
+            f.branch = String(chunk[r].dropFirst(#""gitBranch":""#.count).dropLast())
+        }
+        for line in chunk.split(separator: "\n") where line.contains("\"tool_use\"") && (line.contains("gh pr ") || line.contains("git ")) {
+            guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+            f.add(commands(inEntry: o))
+        }
     }
     return f
 }
@@ -186,9 +191,9 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         default: break
         }
     }
-    guard let cwd else { return nil }
+    guard let cwd = cwd.map(native) else { return nil }
     let clip = { (s: String) in s.count > 60 ? String(s.prefix(60)) + "…" : s }
-    let uuid = url.deletingPathExtension().lastPathComponent
+    let uuid = native(url.deletingPathExtension().lastPathComponent)
     return Session(
         id: "cli_" + uuid, cliId: uuid,
         title: title ?? (first ?? firstCommand).map(clip) ?? "(terminal session)",
