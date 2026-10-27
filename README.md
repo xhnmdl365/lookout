@@ -60,6 +60,9 @@ and set or clear its ticket. Your choice wins over anything detected.
 
 ### Triage
 
+Triage is off until you turn it on in **Settings → AI triage**, since it uses your Claude plan;
+until then its button, verdicts and suggestions stay hidden.
+
 **Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. The panel
 first checks PR and ticket states itself, then hands Claude the task list with those states in
 the prompt. Claude runs with no tools, so it sees only that list, never your transcripts or other

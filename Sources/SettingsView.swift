@@ -1,4 +1,4 @@
-// Settings: integrations, the naming rule and text sizes.
+// Settings: integrations, AI triage, the naming rule and text sizes.
 import SwiftUI
 import AppKit
 
@@ -22,6 +22,9 @@ struct SettingsView: View {
                 Text("Settings of your own, like tool paths or your GitHub org, go in config.json in the app's data folder.")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
                     .padding(.horizontal, 16).padding(.top, 6)
+
+                heading("AI triage")
+                triageCard
 
                 heading("Session naming")
                 namingCard
@@ -70,10 +73,24 @@ struct SettingsView: View {
         .padding(.horizontal, 12).padding(.vertical, 9)
     }
 
+    // Off by default: Triage spends the user's Claude plan, so it's theirs to turn on.
+    private var triageCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $store.triageEnabled) {
+                Text("Show the Triage button").font(.system(size: 12, weight: .semibold))
+            }
+            .toggleStyle(.switch).controlSize(.small).tint(Palette.claude)
+            Text("Triage asks Claude for a one-line verdict on each task in Needs you and In progress, and closes ones with hard evidence. Each run uses your Claude plan, about 10k tokens for a dozen tasks. Off, its verdicts and suggestions are hidden too.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .settingsCard()
+    }
+
     // The rule lives in the user's own ~/.claude/CLAUDE.md, added or removed only from here.
     private var namingCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Have Claude name a session reviewing a teammate's PR \"Team code review: …\", so it's recognised at once. Without it, review sessions are still found, by the PR's author.")
+            Text("Have Claude name a session reviewing a teammate's PR \"Team code review: …\", so it's recognised at once. Without it, review sessions are still found from what the session did.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
@@ -97,11 +114,7 @@ struct SettingsView: View {
                     .transition(.opacity)
             }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.07)))
-        .padding(.horizontal, 10)
+        .settingsCard()
     }
 
     private func row(_ role: TextRole) -> some View {
@@ -134,5 +147,17 @@ struct SettingsView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+}
+
+private extension View {
+    // A settings section's card: a padded, rounded panel.
+    func settingsCard() -> some View {
+        padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.07)))
+            .padding(.horizontal, 10)
     }
 }

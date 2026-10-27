@@ -15,6 +15,14 @@ final class Store: ObservableObject {
     @Published var runs: [JudgeRun] = []
     @Published var days: [String] = []        // snapshot days, oldest first
     @Published var summarizing: String?       // the day Claude is summarizing
+    // Triage is opt-in: each run is a `claude -p` call that counts toward the user's plan. Off,
+    // its button, verdicts and suggestions are gone, and earlier verdicts close nothing.
+    @Published var triageEnabled = UserDefaults.standard.bool(forKey: "triageEnabled") {
+        didSet {
+            UserDefaults.standard.set(triageEnabled, forKey: "triageEnabled")
+            reload()
+        }
+    }
     var lastSnapshotTasks: Data?
     var summaryTried: [String: Date] = [:]  // day -> last auto attempt, retried after 30 min
     var prLive: [String: PRInfo] = [:]  // PR url -> from gh
@@ -262,7 +270,7 @@ final class Store: ObservableObject {
                 marks[s.id] = Mark(at: s.lastActivity.timeIntervalSince1970, reason: reason, auto: true)
             }
         }
-        if let j = judge {
+        if triageEnabled, let j = judge {
             let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             for v in j.verdicts where v.verdict == "done" && marks[v.id] == nil && !dismissed.contains(v.id) {
                 // Only if nothing happened since Claude looked; a failed check leaves it a suggestion.
@@ -370,7 +378,7 @@ final class Store: ObservableObject {
     // MARK: Suggestions (layer 3)
 
     func suggestion(_ s: Session) -> String? {
-        guard let j = judge, !isDone(s), !isOnHold(s), !(manual.dismissed ?? []).contains("s:" + s.id),
+        guard triageEnabled, let j = judge, !isDone(s), !isOnHold(s), !(manual.dismissed ?? []).contains("s:" + s.id),
               let v = j.verdicts.first(where: { $0.id == s.id && ["suggest_done", "done"].contains($0.verdict) }),
               v.current(for: s, runAt: j.generatedAt)
         else { return nil }
@@ -380,7 +388,7 @@ final class Store: ObservableObject {
 
     // Triage's one-line verdict on a task it judged still active; gone once the session moves on.
     func verdictNote(_ s: Session) -> String? {
-        guard let j = judge, !isDone(s),
+        guard triageEnabled, let j = judge, !isDone(s),
               let v = j.verdicts.first(where: { $0.id == s.id && $0.verdict == "active" }),
               v.current(for: s, runAt: j.generatedAt) else { return nil }
         return v.reason

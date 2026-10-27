@@ -84,7 +84,7 @@ struct ContentView: View {
                 Divider()
                 SettingsView(store: store).canvas()
             } else {
-                if viewDay == nil, let err = store.judge?.error {
+                if viewDay == nil, store.triageEnabled, let err = store.judge?.error {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 10.5)).foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 8)
@@ -136,7 +136,7 @@ struct ContentView: View {
             if viewDay != nil {
                 Button("Back to today") { viewDay = nil }
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
-            } else {
+            } else if store.triageEnabled {
                 TriageButton(running: store.judging) { store.runJudge() }
                     .hoverHint(judgeHelp)
                     .contextMenu {

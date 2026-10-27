@@ -79,7 +79,7 @@ extension Store {
 
     // `dry` only writes the task list Claude would get, to open-tasks.json, for checking.
     func runJudge(all: Bool = false, dry: Bool = false) {
-        guard !judging else { return }
+        guard triageEnabled, !judging else { return }
         let listed = judged
         let tasks = all ? listed : listed.filter(needsTriage)
         guard !tasks.isEmpty else {
