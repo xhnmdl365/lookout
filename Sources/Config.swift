@@ -30,6 +30,7 @@ struct Config: Codable {
     var ghPath: String?
     var acliPath: String?
     var githubOrg: String?     // the org for "repo#123" mentions when no folder says which
+    var jiraSite: String?      // e.g. "yourteam.atlassian.net", for ticket links; else acli's site
     var triageModel: String?   // the model Triage and day summaries run on
     var activeHours: Double?
     var blockedDays: Double?
@@ -49,6 +50,7 @@ struct Integration: Identifiable {
     let state: State
     let detail: String
     let fix: String?  // the command or step that sets it up
+    var site: String? = nil  // Jira: the site acli is signed in to
 
     static func check() -> [Integration] {
         var out: [Integration] = []
@@ -83,7 +85,7 @@ struct Integration: Identifiable {
             out.append(Integration(id: "jira", name: "Atlassian CLI", purpose: "Optional: Jira ticket status closes own work",
                                    state: ok ? .ready : .signedOut,
                                    detail: ok ? "Connected" + (site.map { " to \($0)" } ?? "") : "Signed out",
-                                   fix: ok ? nil : "acli jira auth login --web"))
+                                   fix: ok ? nil : "acli jira auth login --web", site: ok ? site : nil))
         } else {
             out.append(Integration(id: "jira", name: "Atlassian CLI", purpose: "Optional: Jira ticket status closes own work",
                                    state: .missing, detail: "Not installed", fix: "See the README to install acli"))

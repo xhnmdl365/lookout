@@ -169,11 +169,28 @@ extension Store {
     // Whether Jira, not PRs, settles this task: own work whose ticket acli could read.
     func ticketDecides(_ s: Session) -> Bool { ticket(for: s).flatMap { tickets[$0] } != nil }
 
-    // The ticket's current status, for the footer line of own work; with its key when the title
-    // doesn't already show it.
+    // The ticket's key and current status, for the footer line of own work.
     func ticketStatus(_ s: Session) -> String? {
         guard let key = ticket(for: s), let status = tickets[key]?.status else { return nil }
-        return s.title.contains(key) ? status : "\(key) \(status)"
+        return "\(key) \(status)"
+    }
+
+    // A ticket's page in Jira, once the site is known.
+    func ticketURL(_ key: String) -> URL? {
+        guard let site = jiraSite?.replacingOccurrences(of: "https://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/")), !site.isEmpty else { return nil }
+        return URL(string: "https://\(site)/browse/\(key)")
+    }
+
+    // The teammates' PRs a code review is about: those it names or looked at whose author isn't
+    // the user, else, before gh has said who wrote them, the ones it checked out or reviewed.
+    func reviewedTeamPRs(_ s: Session) -> [String] {
+        let refs = textRefs[s.id] ?? []
+        if let me {
+            let theirs = refs.filter { prLive[$0]?.author.map { $0 != me } ?? false }
+            if !theirs.isEmpty { return theirs }
+        }
+        return reviewedPRs(s, repos: repoByCwd)
     }
 
     private func reviewText(_ s: Session) -> String { [s.title, s.detail ?? "", s.needs ?? ""].joined(separator: "\n") }

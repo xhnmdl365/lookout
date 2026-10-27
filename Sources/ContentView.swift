@@ -16,6 +16,7 @@ struct SectionSpec {
 struct ContentView: View {
     @ObservedObject private var sizes = TextSizes.shared
     @ObservedObject var store: Store
+    var forRender = false  // the offscreen copy `render-now` draws
     @State private var toggled: Set<String> = []  // collapsible sections flipped from their default
     @State private var viewDay: String?  // nil: today, live
     @State private var jumpTo: String?   // a section the count strip asked to scroll to
@@ -110,7 +111,9 @@ struct ContentView: View {
         }
         .frame(minWidth: 300, minHeight: 260)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(RenderCheck.shared.$settings.dropFirst()) { showSettings = $0 }
+        .onReceive(RenderCheck.shared.$settings) { if forRender { showSettings = $0 } }
+        .onReceive(RenderCheck.shared.$day) { if forRender, let d = $0 { viewDay = d } }
+        .environment(\.forRender, forRender)
     }
 
     private var header: some View {
@@ -132,7 +135,7 @@ struct ContentView: View {
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.claude)
             } else {
-            IconButton(symbol: "textformat.size", help: "Text size") { showSettings = true }
+            IconButton(symbol: "gearshape", help: "Settings: AI triage, integrations, text size") { showSettings = true }
             if viewDay != nil {
                 Button("Back to today") { viewDay = nil }
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
@@ -176,7 +179,7 @@ struct ContentView: View {
             }
         }
         .onReceive(RenderCheck.shared.$jump.compactMap { $0 }) { title in
-            RenderCheck.shared.jump = nil
+            guard forRender else { return }
             reveal(title)
         }
         }

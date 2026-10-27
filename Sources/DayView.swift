@@ -38,8 +38,7 @@ struct SummaryBox: View {
             if editing {
                 TextEditor(text: $draft).font(.system(size: sizes.pt(.detail))).frame(height: 90)
             } else if let text = snap?.summary {
-                Text(text).font(.system(size: sizes.pt(.detail, 0.5))).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                SummaryText(text: text, size: sizes.pt(.detail, 0.5))
             } else if snap == nil {
                 Text("No snapshot for this day").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
@@ -47,6 +46,37 @@ struct SummaryBox: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Palette.suggestion.opacity(0.06)))
         .padding(.horizontal, 12).padding(.top, 12)
+    }
+}
+
+// Claude writes the summary in Markdown: "- " lines become bullets with a hanging indent, and
+// **bold**, *italic* and `code` are drawn rather than shown as symbols.
+struct SummaryText: View {
+    let text: String
+    let size: CGFloat
+
+    var body: some View {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                if let item = ["- ", "* ", "• "].first(where: line.hasPrefix).map({ String(line.dropFirst($0.count)) }) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("•").foregroundStyle(.secondary)
+                        inline(item)
+                    }
+                } else {
+                    inline(line.hasPrefix("#") ? "**" + line.drop { $0 == "#" || $0 == " " } + "**" : line)
+                }
+            }
+        }
+        .font(.system(size: size))
+        .textSelection(.enabled)
+    }
+
+    private func inline(_ s: String) -> some View {
+        Text((try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+             ?? AttributedString(s))
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

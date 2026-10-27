@@ -25,6 +25,7 @@ another one is shown nested under it, and a child waiting on you brings its whol
 
 Each row shows the session's status, the next step it needs from you, where it runs (Claude app
 or Terminal), the project, branch and ticket status, when it last moved and how long it has run.
+The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
 Hover a row to pin it, put it on hold, or mark it done. Click it to open the session: desktop
 sessions open in the Claude app; terminal sessions switch to their Terminal tab, or resume in a
 new one if they aren't running.
@@ -60,7 +61,7 @@ and set or clear its ticket. Your choice wins over anything detected.
 
 ### Triage
 
-Triage is off until you turn it on in **Settings → AI triage**, since it uses your Claude plan;
+Triage is off until you turn it on in **Settings → AI triage** (the gear at the top), since it uses your Claude plan;
 until then its button, verdicts and suggestions stay hidden.
 
 **Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. The panel
@@ -132,6 +133,7 @@ Personal settings go in `config.json` in the data folder
   "ghPath": "/path/to/gh",
   "acliPath": "/path/to/acli",
   "githubOrg": "your-org",
+  "jiraSite": "yourteam.atlassian.net",
   "triageModel": "sonnet",
   "activeHours": 36,
   "blockedDays": 14,
@@ -145,6 +147,7 @@ Personal settings go in `config.json` in the data folder
 - Tool paths are only needed when a tool isn't in a usual place (Homebrew, `~/.local/bin`, …).
 - `githubOrg` is used for mentions like `api#123` in folders that aren't a GitHub repo; by
   default it's the org most of your folders point to.
+- `jiraSite` is where ticket links go; by default it's the site the Atlassian CLI is signed in to.
 
 Text sizes are set in **Settings → Text size**.
 

@@ -14,6 +14,15 @@ struct Elbow: Shape {
     }
 }
 
+// A link in a row's footer line, like a ticket or the PR under review; it opens in the browser
+// rather than opening the session.
+struct RowLink: Identifiable {
+    let label: String
+    let url: URL
+    let help: String
+    var id: String { url.absoluteString }
+}
+
 // The shared shape of a task row: dot, title, body lines, then the badge and meta line.
 // Actions appear on hover, floating over the row's top-right corner.
 struct RowShell<Lines: View, Actions: View>: View {
@@ -28,6 +37,8 @@ struct RowShell<Lines: View, Actions: View>: View {
     let terminal: Bool
     var quietBadge = false
     let meta: String
+    var links: [RowLink] = []    // shown after `meta`, each its own click
+    var metaTail: String? = nil  // after the links: when it last moved
     var duration: String? = nil  // how long the session has run, shown with a timer icon
     let clickable: Bool
     let help: String
@@ -36,11 +47,12 @@ struct RowShell<Lines: View, Actions: View>: View {
     @ViewBuilder let actions: () -> Actions
     @State private var hovering = false
     @ObservedObject private var renderCheck = RenderCheck.shared
+    @Environment(\.forRender) private var forRender
 
     // Title and body lines beside the dot; below them, flush with the dot, the footer line:
     // badge and meta on the left, the hover actions on the right where they cover nothing.
     var body: some View {
-        let showActions = hovering || renderCheck.showActions
+        let showActions = hovering || (forRender && renderCheck.showActions)
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 9) {
                 if nested {
@@ -66,7 +78,18 @@ struct RowShell<Lines: View, Actions: View>: View {
             }
             HStack(spacing: 6) {
                 SourceBadge(terminal: terminal, quiet: quietBadge)
-                Text(meta).font(.system(size: sizes.pt(.meta))).foregroundStyle(.tertiary).lineLimit(1)
+                HStack(spacing: 0) {
+                    // The project keeps its room first; the time at the end gives way.
+                    Text(meta).foregroundStyle(.tertiary).lineLimit(1).layoutPriority(2)
+                    ForEach(links) { link in
+                        Text(" · ").foregroundStyle(.tertiary)
+                        Button(link.label) { NSWorkspace.shared.open(link.url) }
+                            .buttonStyle(.plain).foregroundStyle(Color(nsColor: .linkColor).opacity(dimmed ? 0.6 : 0.9))
+                            .lineLimit(1).fixedSize().help(link.help)
+                    }
+                    if let metaTail { Text(" · " + metaTail).foregroundStyle(.tertiary).lineLimit(1) }
+                }
+                .font(.system(size: sizes.pt(.meta)))
                 if let duration {
                     Text("\(Image(systemName: "timer")) \(duration)")
                         .font(.system(size: sizes.pt(.meta))).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
@@ -149,7 +172,7 @@ struct Row: View {
             titlePrefix: teamReview ? "Team code review" : nil,
             titleDone: done, dimmed: done || s.deleted,
             pinned: store.isPinned(s) && !done, terminal: s.isTerminal,
-            quietBadge: store.badgeIsQuiet(terminal: s.isTerminal), meta: meta,
+            quietBadge: store.badgeIsQuiet(terminal: s.isTerminal), meta: meta, links: links, metaTail: metaTail,
             duration: s.startedAt.map { span(s.lastActivity.timeIntervalSince($0)) }, clickable: !s.deleted,
             help: openHelp(deleted: s.deleted, terminal: s.isTerminal), onOpen: { store.open(s.id) }
         ) {
@@ -225,11 +248,30 @@ struct Row: View {
         }
     }
 
+    // Where it runs; the ticket's status joins it as plain text when there's no Jira link for it.
     private var meta: String {
-        let where_ = [s.project, s.branch, store.ticketStatus(s)].compactMap { $0 }.joined(separator: " · ")
-        if s.deleted { return where_ + " · deleted" }
+        let ticket = store.ticket(for: s).flatMap { store.ticketURL($0) } == nil ? store.ticketStatus(s) : nil
+        return [s.project, s.branch, ticket].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // The ticket, opening in Jira; for a code review, the teammates' PRs under review instead.
+    private var links: [RowLink] {
+        if teamReview {
+            return store.reviewedTeamPRs(s).prefix(2).compactMap { u in
+                guard let url = URL(string: u) else { return nil }
+                let parts = url.pathComponents  // ["/", owner, repo, "pull", n]
+                let label = parts.count >= 5 ? "\(parts[2])#\(parts[4])" : u
+                return RowLink(label: label, url: url, help: "Open the PR under review on GitHub")
+            }
+        }
+        guard let key = store.ticket(for: s), let url = store.ticketURL(key) else { return [] }
+        return [RowLink(label: store.ticketStatus(s) ?? key, url: url, help: "Open \(key) in Jira")]
+    }
+
+    private var metaTail: String {
+        if s.deleted { return "deleted" }
         let carried = s.lastActivity < Calendar.current.startOfDay(for: Date()) && !store.isDone(s) ? " · carried over" : ""
-        return "\(where_) · \(relative(s.lastActivity))\(carried)"
+        return relative(s.lastActivity) + carried
     }
 }
 

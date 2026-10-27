@@ -45,6 +45,7 @@ final class Store: ObservableObject {
     var teamReviews = Set<String>()    // tasks reviewing a teammate's PR
     var tickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]  // Jira key -> from acli
     var ticketMissing = Set<String>()  // keys acli couldn't read, not asked again
+    var jiraSite = config.jiraSite     // for ticket links; else found from acli
     private var lastPrRefresh = Date.distantPast
     private var timer: Timer?
     private let loadQueue = DispatchQueue(label: "taskfloat.load", qos: .utility)
@@ -98,7 +99,7 @@ final class Store: ObservableObject {
                 let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate?.timeIntervalSince1970 ?? 0
                 if let cached = self.sessionCache[url.path], cached.mtime == mtime {
-                    out.append(self.withPendingAsk(cached.session))
+                    out.append(autoreleasepool { self.withPendingAsk(cached.session) })
                     continue
                 }
                 guard let data = try? Data(contentsOf: url),
@@ -127,7 +128,7 @@ final class Store: ObservableObject {
                     parentId: ((d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String).map(native),
                     startedAt: (d["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
                 self.sessionCache[url.path] = (mtime, session)
-                out.append(self.withPendingAsk(session))
+                out.append(autoreleasepool { self.withPendingAsk(session) })
             }
             out.sort { $0.lastActivity > $1.lastActivity }
             // Keep only the newest unarchived run of each scheduled task.
@@ -168,7 +169,10 @@ final class Store: ObservableObject {
     func checkIntegrations() {
         DispatchQueue.global(qos: .utility).async {
             let found = Integration.check()
-            DispatchQueue.main.async { self.integrations = found }
+            DispatchQueue.main.async {
+                self.integrations = found
+                if config.jiraSite == nil, let site = found.first(where: { $0.id == "jira" })?.site { self.jiraSite = site }
+            }
         }
     }
 
@@ -217,11 +221,11 @@ final class Store: ObservableObject {
                 }
                 var terminal = cached?.terminal
                 if terminal == nil {
-                    guard let e = transcriptEntrypoint(url) else { continue }  // still empty; look again later
+                    guard let e = autoreleasepool(invoking: { transcriptEntrypoint(url) }) else { continue }  // still empty; look again later
                     terminal = e == "cli"
                 }
                 let created = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
-                let s = terminal == true ? parseTerminalSession(url, mtime: mtime, created: created) : nil
+                let s = terminal == true ? autoreleasepool { parseTerminalSession(url, mtime: mtime, created: created) } : nil
                 transcriptCache[url.path] = (mtime, terminal ?? false, s)
                 if let s { found.append(s) }
             }

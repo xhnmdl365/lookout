@@ -132,19 +132,25 @@ func scanTranscript(_ url: URL, from facts: TranscriptFacts) -> TranscriptFacts 
     var f = size < facts.offset ? TranscriptFacts() : facts  // rewritten: start over
     try? h.seek(toOffset: f.offset)
     // A few megabytes at a time, whole lines only: some transcripts run to tens of megabytes.
+    // Each block's temporary objects are freed before the next, or a first pass over every
+    // transcript would hold hundreds of megabytes at once.
     var carry = Data()
-    while let block = try? h.read(upToCount: 4 << 20), !block.isEmpty {
-        let data = carry + block
-        guard let end = data.lastIndex(of: UInt8(ascii: "\n")) else { carry = data; continue }
-        let chunk = String(decoding: data[...end], as: UTF8.self)
-        f.offset += UInt64(end + 1)
-        carry = Data(data[(end + 1)...])
-        if let r = chunk.range(of: #""gitBranch":"([^"]+)""#, options: [.regularExpression, .backwards]) {
-            f.branch = String(chunk[r].dropFirst(#""gitBranch":""#.count).dropLast())
-        }
-        for line in chunk.split(separator: "\n") where line.contains("\"tool_use\"") && (line.contains("gh pr ") || line.contains("git ")) {
-            guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
-            f.add(commands(inEntry: o))
+    var more = true
+    while more {
+        autoreleasepool {
+            guard let block = try? h.read(upToCount: 4 << 20), !block.isEmpty else { more = false; return }
+            let data = carry + block
+            guard let end = data.lastIndex(of: UInt8(ascii: "\n")) else { carry = data; return }
+            let chunk = String(decoding: data[...end], as: UTF8.self)
+            f.offset += UInt64(end + 1)
+            carry = Data(data[(end + 1)...])
+            if let r = chunk.range(of: #""gitBranch":"([^"]+)""#, options: [.regularExpression, .backwards]) {
+                f.branch = String(chunk[r].dropFirst(#""gitBranch":""#.count).dropLast())
+            }
+            for line in chunk.split(separator: "\n") where line.contains("\"tool_use\"") && (line.contains("gh pr ") || line.contains("git ")) {
+                guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+                f.add(commands(inEntry: o))
+            }
         }
     }
     return f

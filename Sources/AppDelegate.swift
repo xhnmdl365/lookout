@@ -2,11 +2,19 @@
 import SwiftUI
 import AppKit
 
+// The panel floats beside whatever app the user works in, so a click on it should act at once,
+// not just bring it forward and wait for a second click.
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var panel: NSPanel!
     var statusItem: NSStatusItem!
     var renderTimer: Timer?
     var store: Store!
+    var renderWindow: NSWindow?  // the offscreen copy being drawn for render-now
+    var pendingJump: String?
 
     @objc func showPanel() { panel.orderFrontRegardless() }
     @objc func quit() { NSApp.terminate(nil) }
@@ -25,8 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     // A `render-now` file in the data folder saves the panel as render.png, for checking the
-    // look without screen-recording permission. A number in the file renders at that height;
-    // the word "actions" shows every row's hover buttons, and "settings" the text-size page.
+    // look without screen-recording permission. It draws an offscreen copy of the panel, so the
+    // user's own panel never moves. A number in the file renders at that height; the word
+    // "actions" shows every row's hover buttons, "settings" the settings page, and "yesterday"
+    // the latest past day.
     @objc func renderIfAsked() {
         // A `triage-now` file runs Triage, over every listed task when it says "all"; "dry" only
         // writes the task list Claude would get.
@@ -35,31 +45,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try? FileManager.default.removeItem(at: triage)
             store.runJudge(all: words.contains("all"), dry: words.contains("dry"))
         }
-        // A `jump-now` file holding a section title acts like clicking that section's count.
+        // A `jump-now` file holding a section title scrolls the next render to that section.
         let jump = dataDir.appendingPathComponent("jump-now")
         if let title = try? String(contentsOf: jump, encoding: .utf8) {
             try? FileManager.default.removeItem(at: jump)
-            RenderCheck.shared.jump = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingJump = title.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let trigger = dataDir.appendingPathComponent("render-now")
-        guard let request = try? String(contentsOf: trigger, encoding: .utf8) else { return }
+        guard renderWindow == nil, let request = try? String(contentsOf: trigger, encoding: .utf8) else { return }
         try? FileManager.default.removeItem(at: trigger)
-        let saved = panel.frame
         let words = request.split(whereSeparator: \.isWhitespace)
-        if let h = words.compactMap({ Double($0) }).first {
-            panel.setFrame(NSRect(x: saved.minX, y: saved.maxY - h, width: saved.width, height: h), display: true)
-        }
+        let size = NSSize(width: panel.frame.width,
+                          height: words.compactMap { Double($0) }.first ?? panel.contentView?.bounds.height ?? 600)
+        // Borderless windows aren't kept on screen, so this one draws far off it.
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let view = NSHostingView(rootView: ContentView(store: store, forRender: true))
+        window.contentView = view
+        window.orderFrontRegardless()
+        renderWindow = window
         RenderCheck.shared.showActions = words.contains("actions")
-        if words.contains("settings") { RenderCheck.shared.settings = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let v = self.panel.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
-                v.cacheDisplay(in: v.bounds, to: rep)
+        RenderCheck.shared.settings = words.contains("settings")
+        RenderCheck.shared.day = words.contains("yesterday") ? store.days.last { $0 < dayKey(Date()) } : nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if let j = self.pendingJump { RenderCheck.shared.jump = j }
+            self.pendingJump = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?
                     .write(to: dataDir.appendingPathComponent("render.png"))
             }
             RenderCheck.shared.showActions = false
-            if words.contains("settings") { RenderCheck.shared.settings = false }
-            self.panel.setFrame(saved, display: true)
+            RenderCheck.shared.settings = false
+            RenderCheck.shared.jump = nil
+            RenderCheck.shared.day = nil
+            window.orderOut(nil)
+            window.contentView = nil
+            self.renderWindow = nil
         }
     }
 
@@ -85,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         store = Store()
-        panel.contentView = NSHostingView(rootView: ContentView(store: store))
+        panel.contentView = FirstClickHostingView(rootView: ContentView(store: store))
         if !panel.setFrameUsingName("ClaudeTasksPanel"), let f = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: f.maxX - 380, y: f.maxY - 620))
         }

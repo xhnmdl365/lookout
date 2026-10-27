@@ -270,9 +270,20 @@ struct IconButton: View {
 }
 
 // Set while rendering for a visual check, so hover-only controls show in the picture.
+// Whether a view is the offscreen copy drawn for `render-now`. Only that copy follows
+// RenderCheck, so a check never resizes, scrolls or opens settings on the user's own panel.
+private struct ForRenderKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var forRender: Bool {
+        get { self[ForRenderKey.self] }
+        set { self[ForRenderKey.self] = newValue }
+    }
+}
+
 final class RenderCheck: ObservableObject {
     static let shared = RenderCheck()
     @Published var showActions = false
     @Published var jump: String?  // a section title, as if its count were clicked
-    @Published var settings = false  // shows the text-size page while rendering
+    @Published var settings = false  // shows the settings page while rendering
+    @Published var day: String?      // shows that past day while rendering
 }
