@@ -82,10 +82,10 @@ struct RowShell<Lines: View, Actions: View>: View {
                     // The project keeps its room first; the time at the end gives way.
                     Text(meta).foregroundStyle(.tertiary).lineLimit(1).layoutPriority(2)
                     ForEach(links) { link in
-                        Text(" · ").foregroundStyle(.tertiary)
+                        Text(" · ").foregroundStyle(.tertiary).fixedSize()
                         Button(link.label) { NSWorkspace.shared.open(link.url) }
                             .buttonStyle(.plain).foregroundStyle(Color(nsColor: .linkColor).opacity(dimmed ? 0.6 : 0.9))
-                            .lineLimit(1).fixedSize().help(link.help)
+                            .lineLimit(1).layoutPriority(1).help(link.help)
                     }
                     if let metaTail { Text(" · " + metaTail).foregroundStyle(.tertiary).lineLimit(1) }
                 }

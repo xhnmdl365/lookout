@@ -21,7 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var renderWindow: NSWindow?  // the offscreen copy being drawn for render-now
     var pendingJump: String?
 
-    @objc func showPanel() { panel.orderFrontRegardless() }
+    @objc func showPanel() {
+        if panel.isMiniaturized { panel.deminiaturize(nil) }
+        panel.orderFrontRegardless()
+    }
     @objc func quit() { NSApp.terminate(nil) }
 
     // Closing the panel (close button or Esc) only hides it; the menu bar icon brings it back.
@@ -117,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.menu = menu
 
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 600),
-                        styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+                        styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         panel.title = "Claude Tasks"
         panel.level = .floating
@@ -126,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.delegate = self
+        // As narrow as the list lays out; any narrower and SwiftUI would centre it and cut off both sides.
+        panel.contentMinSize = NSSize(width: 300, height: 260)
         store = Store()
         panel.contentView = NSHostingView(rootView: ContentView(store: store))
         if !panel.setFrameUsingName("ClaudeTasksPanel"), let f = NSScreen.main?.visibleFrame {

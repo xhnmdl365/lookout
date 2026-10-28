@@ -61,8 +61,9 @@ struct ContentView: View {
                             .foregroundStyle(spec.items.isEmpty ? Color.secondary.opacity(0.45) : spec.tint)
                         Text(spec.short)
                             .font(.system(size: sizes.pt(.count, -7), weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                            .minimumScaleFactor(0.75)  // a narrow panel shrinks the labels rather than running them together
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .frame(maxWidth: .infinity).padding(.vertical, 5).padding(.horizontal, 1.5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
