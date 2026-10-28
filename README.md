@@ -124,8 +124,9 @@ acli jira auth login --web
 open Lookout.app
 ```
 
-The panel stays on top of other windows. Closing it only hides it; open the app again (or use
-its menu bar icon) to bring it back.
+The panel stays on top of other windows. Closing or minimizing it only hides it; click Lookout
+in the Dock (or its menu bar icon) to bring it back. To rebuild the app icon after changing it:
+`swift scripts/make-icon.swift`.
 
 ## Optional: session naming
 

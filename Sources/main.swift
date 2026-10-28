@@ -8,5 +8,5 @@ import AppKit
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)  // in the Dock: click it to bring the panel back
 app.run()

@@ -6,5 +6,5 @@ A=Lookout.app/Contents
 mkdir -p $A/MacOS $A/Resources
 swiftc -swift-version 5 -O -o $A/MacOS/Lookout Sources/*.swift
 cp Info.plist $A/Info.plist
-cp judge-prompt.md $A/Resources/
+cp judge-prompt.md AppIcon.icns $A/Resources/
 codesign --force -s - Lookout.app

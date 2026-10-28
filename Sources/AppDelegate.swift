@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func quit() { NSApp.terminate(nil) }
 
-    // Closing the panel (close button or Esc) only hides it; the menu bar icon brings it back.
+    // Closing the panel (close button or Esc) only hides it; the Dock or menu bar icon brings it back.
     func windowWillClose(_ notification: Notification) {
         log("panel closed (event: \(NSApp.currentEvent.map { "\($0.type.rawValue)" } ?? "none"))")
     }
@@ -109,8 +109,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    // The menu bar while Lookout is in front: Quit, and Edit, which is what makes copy, paste
+    // and undo work in the to-do fields.
+    private func buildMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(title: "Show Panel", action: #selector(showPanel), keyEquivalent: "0"))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Hide Lookout", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        appMenu.addItem(NSMenuItem(title: "Quit Lookout", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.items.first?.target = self
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+        let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(redo)
+        edit.addItem(.separator())
+        edit.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        edit.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        edit.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        edit.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyData()  // before anything creates the new data folder
+        buildMainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Lookout")
         let menu = NSMenu()

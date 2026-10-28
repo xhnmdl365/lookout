@@ -16,8 +16,8 @@
 	<string>0.1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
-	<key>LSUIElement</key>
-	<true/>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Switches to the Terminal tab running a terminal Claude session, or resumes it in a new tab.</string>
 </dict>
