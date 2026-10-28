@@ -25,13 +25,13 @@ struct ContentView: View {
 
     private var specs: [SectionSpec] {
         [
-            SectionSpec(title: "Needs you", short: "Needs you", tint: Palette.needsYou, items: store.needsYou),
+            SectionSpec(title: "Attention", short: "Attention", tint: Palette.needsYou, items: store.needsYou),
             SectionSpec(title: "To-do", short: "To-do", tint: Palette.todo, items: store.todoTasks),
-            SectionSpec(title: "In progress", short: "In progress", tint: Palette.active, items: store.active),
+            SectionSpec(title: "Active", short: "Active", tint: Palette.active, items: store.active),
             SectionSpec(title: "Idle lately", short: "Idle", tint: Palette.idle, items: store.idle,
                         collapsible: true, startOpen: true,
                         trailing: ("Mark all done", { store.markAllDone(store.idle) })),
-            SectionSpec(title: "On hold", short: "On hold", tint: Palette.onHold, items: store.onHold, collapsible: true),
+            SectionSpec(title: "Parked", short: "Parked", tint: Palette.onHold, items: store.onHold, collapsible: true),
             SectionSpec(title: "Scheduled", short: "Scheduled", tint: Palette.scheduled,
                         items: store.scheduled.filter { !$0.waiting }, collapsible: true),
             SectionSpec(title: "Done today", short: "Done", tint: Palette.done, items: store.doneToday,
@@ -53,7 +53,8 @@ struct ContentView: View {
     // Every section's count at a glance; tapping one opens that section and scrolls to it.
     private var countStrip: some View {
         HStack(spacing: 0) {
-            ForEach(specs, id: \.title) { spec in
+            // Only sections with something in them: an empty one has nothing to jump to.
+            ForEach(specs.filter { !$0.items.isEmpty }, id: \.title) { spec in
                 Button { reveal(spec.title) } label: {
                     VStack(spacing: 1) {
                         Text("\(spec.items.count)")
@@ -259,7 +260,7 @@ struct ContentView: View {
             usage += ", about \(recent.map { $0.tokensIn + $0.tokensOut }.reduce(0, +) / recent.count / 1000)k tokens each"
         }
         let last = store.judge.map { "Last run " + relative(Date(timeIntervalSince1970: $0.generatedAt)) + ". " } ?? ""
-        return "Gives each task in Needs you and In progress a one-line verdict. "
+        return "Gives each task in Attention and Active a one-line verdict. "
             + "Only tasks that changed since their last verdict are sent; unchanged ones are rechecked daily.\n"
             + "\(usage).\n\(last)Right-click to triage all again, or for the steps."
     }

@@ -174,10 +174,10 @@ let triageModel = config.triageModel ?? "sonnet"
 //   archived / scheduled-run noise -> ignored, except tracked sessions (see "done" below)
 //   scheduled-task runs            -> only the latest run per task, in its own section
 //   done (manual or auto)          -> "Done today" on the day it was marked, then gone
-//   blocked, <= 14 days            -> "Needs you"
-//   activity within 36h, or pinned -> "In progress"
+//   blocked, <= 14 days            -> "Attention"
+//   activity within 36h, or pinned -> "Active"
 //   anything else still open       -> "Idle lately", however old (finished or parked?)
-//   on hold (manual)               -> "On hold": no age limit, skipped by Claude, back to normal on new activity
+//   parked (manual)                -> "Parked": no age limit, skipped by Claude, back to normal on new activity
 // Auto-done, hard evidence only:
 //   layer 1 (here):   tracked session archived / deleted; all its PRs merged or closed (gh refreshed)
 //                     and no work in the session after the last merge (beyond prGraceHours)
@@ -187,7 +187,7 @@ let triageModel = config.triageModel ?? "sonnet"
 // afterwards only the user's own edits change it.
 let activeHours = config.activeHours ?? 36
 let scheduledDays = config.scheduledDays ?? 7    // a scheduled task's latest run shows this long
-let blockedDays = config.blockedDays ?? 14       // blocked longer than this counts as idle, not "Needs you"
+let blockedDays = config.blockedDays ?? 14       // blocked longer than this counts as idle, not "Attention"
 let prRefreshMinutes = config.refreshMinutes ?? 10  // how often PRs and tickets are checked
 let prGraceHours = config.prGraceHours ?? 6      // activity this long after the last merge still counts as wrap-up
 let reverifyHours = config.reverifyHours ?? 24   // an unchanged task's verdict is checked again after this long

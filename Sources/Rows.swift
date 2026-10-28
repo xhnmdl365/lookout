@@ -267,13 +267,13 @@ struct Row: View {
                 let held = store.isOnHold(s)
                 if !held && !s.isTodo {
                     IconButton(symbol: store.isPinned(s) ? "pin.slash.fill" : "pin.fill",
-                               help: store.isPinned(s) ? "Unpin" : "Pin to In progress, however long it sits",
+                               help: store.isPinned(s) ? "Unpin" : "Pin to Active, however long it sits",
                                tint: Palette.active) {
                         store.togglePin(s)
                     }
                 }
-                IconButton(symbol: held ? "play.fill" : "pause.fill",
-                           help: held ? "Resume" : "Put on hold: not now, and Claude skips it",
+                IconButton(symbol: held ? "play.fill" : "parkingsign",
+                           help: held ? "Unpark: back into the list" : "Park it: set aside for later, kept out of Idle and skipped by Claude",
                            tint: held ? Palette.active : Palette.onHold) { store.toggleHold(s) }
             }
             if !s.deleted && !s.archived {

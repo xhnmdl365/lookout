@@ -12,22 +12,22 @@ Tasks are grouped by what they need from you:
 
 | Section | What's in it |
 |---|---|
-| **Needs you** | The session is blocked on you, or its last turn asked you something you haven't answered |
+| **Attention** | The session is blocked on you, or its last turn asked you something you haven't answered |
 | **To-do** | Things you added yourself with **+**; they stay until you mark them done |
-| **In progress** | Worked on in the last 36 hours, or pinned |
+| **Active** | Worked on in the last 36 hours, or pinned |
 | **Idle lately** | Still open, but untouched for a while: finished or parked? |
-| **On hold** | Put aside by you; Triage skips these |
+| **Parked** | Set aside by you for later: long-running work, or something put off for now; it never drifts into Idle, and Triage skips it |
 | **Scheduled** | The latest run of each scheduled task |
 | **Done today** | Marked done today, by you or automatically |
 
 The strip at the top counts each section; click a number to jump there. A session started from
 another one is shown nested under it, and a child waiting on you brings its whole family into
-**Needs you**.
+**Attention**.
 
 Each row shows the session's status, the next step it needs from you, where it runs (Claude app
 or Terminal), the project, branch and ticket status, when it last moved and how long it has run.
 The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
-Hover a row to pin it, put it on hold, or mark it done. Click it to open the session: desktop
+Hover a row to pin it, park it, or mark it done. Click it to open the session: desktop
 sessions open in the Claude app; terminal sessions switch to their Terminal tab, or resume in a
 new one if they aren't running.
 
@@ -75,7 +75,7 @@ and set or clear its ticket. Your choice wins over anything detected.
 Triage is off until you turn it on in **Settings → AI triage** (the gear at the top), since it uses your Claude plan;
 until then its button, verdicts and suggestions stay hidden.
 
-**Triage** asks Claude for a one-line verdict on each task in Needs you and In progress. The panel
+**Triage** asks Claude for a one-line verdict on each task in Attention and Active. The panel
 first checks PR and ticket states itself, then hands Claude the task list with those states in
 the prompt. Claude runs with no tools, so it sees only that list, never your transcripts or other
 files, and answers in one go. With hard evidence

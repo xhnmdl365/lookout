@@ -143,7 +143,7 @@ struct DayView: View {
                           snap.tasks.filter { !snap.isDone($0) && $0.section != "onHold" && worked($0) }, snap)
                     group("Still open", Palette.idle,
                           snap.tasks.filter { !snap.isDone($0) && $0.section != "onHold" && !worked($0) }, snap)
-                    group("On hold", Palette.onHold, snap.tasks.filter { !snap.isDone($0) && $0.section == "onHold" }, snap)
+                    group("Parked", Palette.onHold, snap.tasks.filter { !snap.isDone($0) && $0.section == "onHold" }, snap)
                     Text("Snapshot as of \(Date(timeIntervalSince1970: snap.updatedAt).formatted(date: .omitted, time: .shortened)). Since then only your own edits change it.")
                         .font(.system(size: 10)).foregroundStyle(.tertiary).padding(16)
                 }

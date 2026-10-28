@@ -80,7 +80,7 @@ struct SettingsView: View {
                 Text("Show the Triage button").font(.system(size: 12, weight: .semibold))
             }
             .toggleStyle(.switch).controlSize(.small).tint(Palette.claude)
-            Text("Triage asks Claude for a one-line verdict on each task in Needs you and In progress, and closes ones with hard evidence. Each run uses your Claude plan, about 10k tokens for a dozen tasks. Off, its verdicts and suggestions are hidden too.")
+            Text("Triage asks Claude for a one-line verdict on each task in Attention and Active, and closes ones with hard evidence. Each run uses your Claude plan, about 10k tokens for a dozen tasks. Off, its verdicts and suggestions are hidden too.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

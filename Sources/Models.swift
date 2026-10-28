@@ -104,7 +104,7 @@ struct Manual: Codable {
     var pinned: Set<String>? = []
     var dismissed: Set<String>? = []    // auto marks undone ("<id>") and suggestions ignored ("s:<id>")
     var known: [String: Known]? = [:]   // sessions seen open, so archive/delete can close them
-    var onHold: [String: Double]? = [:] // id -> when the user put it on hold
+    var onHold: [String: Double]? = [:] // id -> when the user parked it
     var kindOverrides: [String: String]? = [:]   // id -> "review" or "own", the user's correction
     var ticketOverrides: [String: String]? = [:] // id -> the user's ticket key, "" for none
 }

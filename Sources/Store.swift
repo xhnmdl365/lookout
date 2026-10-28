@@ -337,7 +337,7 @@ final class Store: ObservableObject {
 
     func isPinned(_ s: Session) -> Bool { manual.pinned?.contains(s.id) ?? false }
 
-    // On hold until the user resumes it, or works in the session again.
+    // Parked until the user unparks it, or works in the session again.
     func isOnHold(_ s: Session) -> Bool {
         guard let at = manual.onHold?[s.id], !isDone(s) else { return false }
         return s.lastActivity.timeIntervalSince1970 <= at + 60
@@ -544,8 +544,8 @@ final class Store: ObservableObject {
 
     // A section's top-level tasks, newest first. A task with children sorts by its family's
     // newest activity, so a child's fresh progress lifts the whole family. And when a child is
-    // waiting on the user, its whole family moves up to "Needs you" (from In progress or Idle;
-    // a family the user put on hold stays there).
+    // waiting on the user, its whole family moves up to "Attention" (from Active or Idle;
+    // a family the user parked stays there).
     private func top(_ section: String) -> [Session] {
         if let done = cache.sections[section] { return done }
         let found = computeTop(section)
@@ -577,7 +577,7 @@ final class Store: ObservableObject {
         sessions.filter { $0.scheduledTaskId != nil && !isDone($0) && within($0, days: scheduledDays) }
     }
 
-    // What Triage looks at: "Needs you" and "In progress", with their open children. Idle,
+    // What Triage looks at: "Attention" and "Active", with their open children. Idle,
     // on-hold and scheduled tasks are skipped.
     var judged: [Session] {
         let listed = needsYou + active

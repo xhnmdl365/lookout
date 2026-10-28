@@ -70,7 +70,7 @@ enum TextRole: String, CaseIterable, Identifiable {
         case .title: return "PROJ-123 Fix the export dialog's progress bar"
         case .detail: return "PR #42 review posted; awaiting approval"
         case .meta: return "web-app · 1 hr. ago · 2d 4h"
-        case .header: return "In progress"
+        case .header: return "Active"
         case .count: return "9"
         }
     }
