@@ -69,7 +69,8 @@ struct RowShell<Lines: View, Actions: View>: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         if pinned {
-                            Image(systemName: "pin.fill").font(.system(size: sizes.pt(.title, -4.5))).foregroundStyle(.tertiary)
+                            Image(systemName: "arrow.up.to.line").font(.system(size: sizes.pt(.title, -4), weight: .bold))
+                                .foregroundStyle(tint).help("Pinned to the top")
                                 .transition(.scale.combined(with: .opacity))
                         }
                     }
@@ -107,7 +108,12 @@ struct RowShell<Lines: View, Actions: View>: View {
             .padding(.leading, nested ? 21 : 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(showActions ? tint.opacity(0.07) : .clear)  // a faint wash of the row's section colour
+        // A faint wash of the row's section colour on hover; pinned rows keep a lighter one, with a
+        // bar down their edge, so they read as held at the top.
+        .background(showActions ? tint.opacity(pinned ? 0.11 : 0.07) : pinned ? tint.opacity(0.05) : .clear)
+        .overlay(alignment: .leading) {
+            if pinned { Rectangle().fill(tint).frame(width: 3) }
+        }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { if clickable { onOpen() } }
@@ -265,9 +271,10 @@ struct Row: View {
     @ViewBuilder private func actions(done: Bool) -> some View {
             if !done && s.scheduledTaskId == nil {
                 let held = store.isOnHold(s)
-                if !held && !s.isTodo {
-                    IconButton(symbol: store.isPinned(s) ? "pin.slash.fill" : "pin.fill",
-                               help: store.isPinned(s) ? "Unpin" : "Pin to Active, however long it sits",
+                if !held {
+                    IconButton(symbol: store.isPinned(s) ? "arrow.down.to.line" : "arrow.up.to.line",
+                               help: store.isPinned(s) ? "Unpin from the top"
+                                   : "Pin to the top of its section; it stays there, and never drifts into Idle",
                                tint: Palette.active) {
                         store.togglePin(s)
                     }

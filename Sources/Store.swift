@@ -542,7 +542,7 @@ final class Store: ObservableObject {
 
     func children(of s: Session) -> [Session] { cache.children[s.id] ?? [] }
 
-    // A section's top-level tasks, newest first. A task with children sorts by its family's
+    // A section's top-level tasks: pinned ones first, then newest first. A task with children sorts by its family's
     // newest activity, so a child's fresh progress lifts the whole family. And when a child is
     // waiting on the user, its whole family moves up to "Attention" (from Active or Idle;
     // a family the user parked stays there).
@@ -565,7 +565,9 @@ final class Store: ObservableObject {
             let own = self.baseSection(s)
             return (own == "active" || own == "idle") && childWaits.contains(s.id) ? "needsYou" : own
         }
-        return sessions.filter { familySection($0) == section && !isNested($0) }.sorted { latest($0) > latest($1) }
+        let pin = { (s: Session) in self.isPinned(s) ? 1 : 0 }
+        return sessions.filter { familySection($0) == section && !isNested($0) }
+            .sorted { (pin($0), latest($0)) > (pin($1), latest($1)) }
     }
 
     var needsYou: [Session] { top("needsYou") + scheduled.filter(\.waiting) }

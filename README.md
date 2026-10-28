@@ -27,7 +27,7 @@ another one is shown nested under it, and a child waiting on you brings its whol
 Each row shows the session's status, the next step it needs from you, where it runs (Claude app
 or Terminal), the project, branch and ticket status, when it last moved and how long it has run.
 The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
-Hover a row to pin it, park it, or mark it done. Click it to open the session: desktop
+Hover a row to pin it to the top of its section, park it, or mark it done. Click it to open the session: desktop
 sessions open in the Claude app; terminal sessions switch to their Terminal tab, or resume in a
 new one if they aren't running.
 
