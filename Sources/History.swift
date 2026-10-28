@@ -34,7 +34,8 @@ extension Store {
                             lastActivity: s.lastActivity.timeIntervalSince1970, deleted: s.deleted,
                             review: review ? true : nil,
                             ticket: review ? nil : ticketStatus(s) ?? ticket(for: s),
-                            reviewPRs: review ? reviewedTeamPRs(s).map(prLabel) : nil)
+                            reviewPRs: review ? reviewedTeamPRs(s).map(prLabel) : nil,
+                            todo: s.isTodo ? true : nil)
         }
         // Flat: nested children are recorded under their own section.
         let open = sessions.compactMap { s in baseSection(s).map { snap(s, $0) } }
@@ -47,6 +48,18 @@ extension Store {
         file.tasks = tasks
         file.updatedAt = Date().timeIntervalSince1970
         saveSnapshot(file, notify: false)
+    }
+
+    // Puts a task marked done after the fact into that day's record: as a correction when the day
+    // already lists it, else as one of that day's finished tasks.
+    func recordDone(_ s: Session, on day: String) {
+        guard var snap = loadSnapshot(day) else { return }
+        if let t = snap.tasks.first(where: { $0.id == s.id }) { return setDone(day, t, true) }
+        snap.tasks.append(SnapTask(id: s.id, title: s.title, project: s.project, section: "done", detail: s.detail,
+                                   needs: nil, doneReason: reasonManual,
+                                   lastActivity: s.lastActivity.timeIntervalSince1970, deleted: false,
+                                   todo: s.isTodo ? true : nil))
+        saveSnapshot(snap)
     }
 
     // The user's corrections to a day; a value matching the snapshot drops the correction.
@@ -81,16 +94,17 @@ extension Store {
     func summarize(_ day: String) {
         guard summarizing == nil, let snap = loadSnapshot(day), !snap.tasks.isEmpty else { return }
         // Only what was worked in that day. A task marked done then without being touched (an
-        // idle one cleared away, archived, closed by a rule) did no work worth reporting. Done
-        // ones first, then the most recently worked in.
+        // idle one cleared away, archived, closed by a rule) did no work worth reporting; but a
+        // to-do has nothing to touch, so doing it is the work, and one done that day counts.
+        // Done ones first, then the most recently worked in.
         let start = dayDate(day).timeIntervalSince1970, end = start + 86400
-        let moved = snap.tasks.filter { (start..<end).contains($0.lastActivity) }
+        let moved = snap.tasks.filter { (start..<end).contains($0.lastActivity) || ($0.todo == true && snap.isDone($0)) }
             .sorted { (snap.isDone($0) ? 1 : 0, $0.lastActivity) > (snap.isDone($1) ? 1 : 0, $1.lastActivity) }
         guard !moved.isEmpty else { return }
         let rows: [[String: Any]] = moved.map { t in
             var r: [String: Any] = ["title": t.title, "section": t.section, "done": snap.isDone(t),
                                     "detail": t.detail ?? "", "needs": t.needs ?? "", "doneReason": t.doneReason ?? ""]
-            if let review = t.review { r["kind"] = review ? "review" : "own work" }
+            if t.todo == true { r["kind"] = "to-do" } else if let review = t.review { r["kind"] = review ? "review" : "own work" }
             if let ticket = t.ticket { r["ticket"] = ticket }
             if let prs = t.reviewPRs, !prs.isEmpty { r["prs"] = prs }
             return r
@@ -100,7 +114,9 @@ extension Store {
         let prompt = """
         Below (JSON) are the user's Claude Code tasks that moved on \(day), finished ones first. \
         `done` already includes the user's own corrections; trust it. `section`: needsYou = waiting \
-        on the user, active = in progress, onHold = parked. `kind` "review" means the user reviewed \
+        on the user, active = in progress, onHold = parked, todo = an open to-do. `kind` "to-do" is \
+        something the user added by hand; it has no session, just a title and maybe a note, and \
+        is ✅ when done, else ⏳; write it like their own tasks. `kind` "review" means the user reviewed \
         a teammate's PR, named in `prs`; when `kind` is missing, a title starting "Code review" or \
         "Team code review" is a review. `ticket` is the Jira key and its status.
 

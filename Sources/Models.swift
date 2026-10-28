@@ -23,6 +23,17 @@ struct PRInfo {
     var reviewers = Set<String>()   // logins asked to review it, or who did
 }
 
+// A to-do the user added by hand: not a Claude session, so nothing tracks it; it's done when
+// they say so. Shown as a Session with id "todo_<uuid>" so it shares the list's marks, holds
+// and day records.
+struct Todo: Codable, Identifiable, Equatable {
+    var id: String
+    var title: String
+    var note: String?
+    var createdAt: Double
+    var editedAt: Double
+}
+
 struct Session: Identifiable, Equatable {
     let id: String
     let cliId: String?
@@ -55,6 +66,9 @@ struct Session: Identifiable, Equatable {
 
     // A `claude` run in a terminal rather than the desktop app; its id is "cli_<session uuid>".
     var isTerminal: Bool { id.hasPrefix("cli_") }
+
+    // A to-do the user added by hand; its id is "todo_<uuid>".
+    var isTodo: Bool { id.hasPrefix("todo_") }
 
     var project: String { projectName(cwd) }
 }
@@ -157,6 +171,7 @@ struct SnapTask: Codable, Identifiable {
     var review: Bool? = nil        // reviewing a teammate's PR
     var ticket: String? = nil      // its Jira key and status, e.g. "PROJ-123 In Review"
     var reviewPRs: [String]? = nil // for a review, the PRs under review, as "repo#12"
+    var todo: Bool? = nil          // a to-do the user added by hand
 }
 
 struct DaySnapshot: Codable {

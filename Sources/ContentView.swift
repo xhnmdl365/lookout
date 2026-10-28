@@ -26,6 +26,7 @@ struct ContentView: View {
     private var specs: [SectionSpec] {
         [
             SectionSpec(title: "Needs you", short: "Needs you", tint: Palette.needsYou, items: store.needsYou),
+            SectionSpec(title: "To-do", short: "To-do", tint: Palette.todo, items: store.todoTasks),
             SectionSpec(title: "In progress", short: "In progress", tint: Palette.active, items: store.active),
             SectionSpec(title: "Idle lately", short: "Idle", tint: Palette.idle, items: store.idle,
                         collapsible: true, startOpen: true,
@@ -152,6 +153,10 @@ struct ContentView: View {
                     .buttonStyle(.borderless).font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.claude)
             } else {
+            IconButton(symbol: "plus", help: "Add a to-do of your own") {
+                withAnimation(Motion.change) { store.addingTodo = true }
+                reveal("To-do")
+            }
             IconButton(symbol: "gearshape", help: "Settings: AI triage, integrations, text size") { showSettings = true }
             if viewDay != nil {
                 Button("Back to today") { viewDay = nil }
@@ -178,7 +183,8 @@ struct ContentView: View {
             // hadn't drawn, so jumps landed short and kept correcting themselves (the flicker).
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(specs, id: \.title) { section($0) }
-                if store.needsYou.isEmpty && store.active.isEmpty && store.idle.isEmpty {
+                if store.needsYou.isEmpty && store.todoTasks.isEmpty && !store.addingTodo
+                    && store.active.isEmpty && store.idle.isEmpty {
                     Text("Nothing open right now")
                         .font(.system(size: 12)).foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity).padding(.vertical, 30)
@@ -243,10 +249,22 @@ struct ContentView: View {
     }
 
     @ViewBuilder private func section(_ spec: SectionSpec) -> some View {
-        if !spec.items.isEmpty {
+        let adding = spec.title == "To-do" && store.addingTodo
+        if !spec.items.isEmpty || adding {
             let open = isOpen(spec)
             Section {
-                if open {
+                if adding {
+                    TodoEditor(title: "", note: "", saveLabel: "Add",
+                               save: { store.addTodo(title: $0, note: $1) },
+                               cancel: { withAnimation(Motion.change) { store.addingTodo = false } })
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.todo.opacity(0.5)))
+                        .padding(.horizontal, 10).padding(.bottom, spec.items.isEmpty ? 0 : 6)
+                        .transition(.opacity)
+                }
+                if open && !spec.items.isEmpty {
                     let entries = spec.items.flatMap { s in
                         [Entry(session: s, nested: false)] + store.children(of: s).map { Entry(session: $0, nested: true) }
                     }

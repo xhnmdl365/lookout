@@ -100,14 +100,16 @@ struct SnapRow: View {
     var body: some View {
         let done = snap.isDone(t)
         let corrected = snap.userDone?[t.id] != nil
-        let terminal = t.id.hasPrefix("cli_")
+        let terminal = t.id.hasPrefix("cli_"), todo = t.id.hasPrefix("todo_")
         let tint: Color = t.deleted ? .gray.opacity(0.4) : done ? Palette.done
-            : ["needsYou": Palette.needsYou, "active": Palette.active, "onHold": Palette.onHold][t.section] ?? Palette.idle
+            : ["needsYou": Palette.needsYou, "active": Palette.active, "onHold": Palette.onHold,
+               "todo": Palette.todo][t.section] ?? Palette.idle
         RowShell(
             tint: tint, title: t.title, titleDone: done, dimmed: done || t.deleted, pinned: false,
-            terminal: terminal, quietBadge: store.badgeIsQuiet(terminal: terminal),
+            terminal: terminal, todo: todo, quietBadge: store.badgeIsQuiet(terminal: terminal),
             meta: t.project + (t.deleted ? " · deleted" : "") + (corrected ? " · corrected by hand" : ""),
-            clickable: !t.deleted, help: openHelp(deleted: t.deleted, terminal: terminal),
+            clickable: !t.deleted && !todo,
+            help: todo ? "A to-do you added" : openHelp(deleted: t.deleted, terminal: terminal),
             onOpen: { store.open(t.id) }
         ) {
             if done {

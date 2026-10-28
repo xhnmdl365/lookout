@@ -13,6 +13,7 @@ Tasks are grouped by what they need from you:
 | Section | What's in it |
 |---|---|
 | **Needs you** | The session is blocked on you, or its last turn asked you something you haven't answered |
+| **To-do** | Things you added yourself with **+**; they stay until you mark them done |
 | **In progress** | Worked on in the last 36 hours, or pinned |
 | **Idle lately** | Still open, but untouched for a while: finished or parked? |
 | **On hold** | Put aside by you; Triage skips these |
@@ -29,6 +30,16 @@ The ticket opens in Jira; a code review shows the teammate's PR it's about, whic
 Hover a row to pin it, put it on hold, or mark it done. Click it to open the session: desktop
 sessions open in the Claude app; terminal sessions switch to their Terminal tab, or resume in a
 new one if they aren't running.
+
+### Your own to-dos
+
+Not everything you track is a Claude session. **+** at the top adds a to-do: a title and an
+optional note. To-dos carry a **To-do** badge instead of App or Terminal, and nothing tracks
+them: no PRs, tickets or Triage. Click one to edit it; right-click to delete it.
+
+They're done when you say so. One left over from an earlier day shows **Done yesterday**, and
+right-click → **Mark done on** offers the past week, for any task: a task marked that way
+counts in that day's record and summary, not today's.
 
 ### Done, automatically
 

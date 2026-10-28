@@ -159,7 +159,7 @@ extension Store {
     // else the title's key. Team code reviews have none: the PR under review decides those.
     func ticket(for s: Session) -> String? {
         if let k = manual.ticketOverrides?[s.id] { return k.isEmpty ? nil : k }
-        guard !teamReviews.contains(s.id) else { return nil }
+        guard !teamReviews.contains(s.id), !s.isTodo else { return nil }
         let keys = ticketCandidates(s)
         return keys.first { tickets[$0] != nil } ?? ticketKey(s.title)
     }
@@ -228,7 +228,7 @@ extension Store {
     func updateReviews(_ all: [Session]) {
         var refs: [String: [String]] = [:], team = Set<String>()
         let overrides = manual.kindOverrides ?? [:]
-        for s in all where !s.archived && !s.deleted && s.scheduledTaskId == nil {
+        for s in all where !s.archived && !s.deleted && s.scheduledTaskId == nil && !s.isTodo {
             let r = taskPRs(s, repos: repoByCwd)
             if !r.isEmpty { refs[s.id] = r }
             if let o = overrides[s.id] {
@@ -254,7 +254,7 @@ extension Store {
     func refreshPRs(then: (() -> Void)? = nil) {
         // Open tasks' PRs, their own and those named in their text. Open ones may have changed;
         // finished ones need their merge time once; ones gh can't find are not asked again.
-        let open = sessions.filter { !$0.archived && !$0.deleted && !isDone($0) && !isOnHold($0) && $0.scheduledTaskId == nil }
+        let open = sessions.filter { !$0.archived && !$0.deleted && !isDone($0) && !isOnHold($0) && $0.scheduledTaskId == nil && !$0.isTodo }
         let folders = Set(open.map(\.cwd)).filter { repoByCwd[$0] == nil }
         let live = prLive, knownRepos = repoByCwd, needMe = me == nil
         // Own work's ticket candidates; keys from PRs gh is about to read are added below.

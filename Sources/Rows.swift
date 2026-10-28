@@ -35,6 +35,7 @@ struct RowShell<Lines: View, Actions: View>: View {
     let dimmed: Bool
     let pinned: Bool
     let terminal: Bool
+    var todo = false
     var quietBadge = false
     let meta: String
     var links: [RowLink] = []    // shown after `meta`, each its own click
@@ -77,7 +78,7 @@ struct RowShell<Lines: View, Actions: View>: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 6) {
-                SourceBadge(terminal: terminal, quiet: quietBadge)
+                SourceBadge(terminal: terminal, quiet: quietBadge, todo: todo)
                 HStack(spacing: 0) {
                     // The project keeps its room first; the time at the end gives way.
                     Text(meta).foregroundStyle(.tertiary).lineLimit(1).layoutPriority(2)
@@ -87,7 +88,9 @@ struct RowShell<Lines: View, Actions: View>: View {
                             .buttonStyle(.plain).foregroundStyle(Color(nsColor: .linkColor).opacity(dimmed ? 0.6 : 0.9))
                             .lineLimit(1).layoutPriority(1).help(link.help)
                     }
-                    if let metaTail { Text(" · " + metaTail).foregroundStyle(.tertiary).lineLimit(1) }
+                    if let metaTail {
+                        Text((meta.isEmpty && links.isEmpty ? "" : " · ") + metaTail).foregroundStyle(.tertiary).lineLimit(1)
+                    }
                 }
                 .font(.system(size: sizes.pt(.meta)))
                 if let duration {
@@ -153,6 +156,7 @@ struct Row: View {
     let s: Session
     @ObservedObject var store: Store
     var nested = false
+    @State private var editing = false  // a to-do's title and note are open for editing
 
     private var teamReview: Bool { store.teamReviews.contains(s.id) }
 
@@ -171,11 +175,53 @@ struct Row: View {
             nested: nested, tint: store.tint(s), title: teamReview ? reviewTitle(s.title) : s.title,
             titlePrefix: teamReview ? "Team code review" : nil,
             titleDone: done, dimmed: done || s.deleted,
-            pinned: store.isPinned(s) && !done, terminal: s.isTerminal,
+            pinned: store.isPinned(s) && !done, terminal: s.isTerminal, todo: s.isTodo,
             quietBadge: store.badgeIsQuiet(terminal: s.isTerminal), meta: meta, links: links, metaTail: metaTail,
-            duration: s.startedAt.map { span(s.lastActivity.timeIntervalSince($0)) }, clickable: !s.deleted,
-            help: openHelp(deleted: s.deleted, terminal: s.isTerminal), onOpen: { store.open(s.id) }
+            duration: s.isTodo ? nil : s.startedAt.map { span(s.lastActivity.timeIntervalSince($0)) },
+            clickable: !s.deleted && !editing,
+            help: s.isTodo ? "Edit this to-do" : openHelp(deleted: s.deleted, terminal: s.isTerminal),
+            onOpen: { if s.isTodo { withAnimation(Motion.change) { editing = true } } else { store.open(s.id) } }
         ) {
+            if editing, let t = store.todos.first(where: { $0.id == s.id }) {
+                TodoEditor(title: t.title, note: t.note ?? "", saveLabel: "Save",
+                           save: { store.updateTodo(t.id, title: $0, note: $1); editing = false },
+                           cancel: { withAnimation(Motion.change) { editing = false } })
+            } else {
+                details(done: done)
+            }
+        } actions: {
+            actions(done: done)
+        }
+        .contextMenu {
+            if !s.deleted && s.scheduledTaskId == nil {
+                let days = store.earlierDoneDays(s)
+                if !days.isEmpty {
+                    Menu("Mark done on") {
+                        ForEach(days, id: \.self) { day in
+                            Button(dayLabel(day)) { store.markDone(s, on: day) }
+                        }
+                    }
+                    Divider()
+                }
+                if s.isTodo {
+                    Button("Edit") { withAnimation(Motion.change) { editing = true } }
+                    Button("Delete to-do", role: .destructive) { store.deleteTodo(s.id) }
+                } else {
+                    corrections
+                }
+            }
+        }
+    }
+
+    // "Yesterday", else the weekday and date.
+    private func dayLabel(_ day: String) -> String {
+        guard let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()), day != dayKey(yesterday) else {
+            return "Yesterday"
+        }
+        return dayDate(day).formatted(Date.FormatStyle(locale: english).weekday(.wide).month(.abbreviated).day())
+    }
+
+    @ViewBuilder private func details(done: Bool) -> some View {
             if done, let m = store.mark(s) {
                 Label((m.auto ? "Auto · " : "") + m.reason, systemImage: "checkmark.circle")
                     .font(.system(size: sizes.pt(.detail))).foregroundStyle(.secondary).lineLimit(2)
@@ -201,10 +247,25 @@ struct Row: View {
                 SuggestionCallout(reason: reason, accept: { store.acceptSuggestion(s) },
                                   dismiss: { store.ignoreSuggestion(s) })
             }
-        } actions: {
+            // A to-do left from an earlier day, often done then and just not ticked.
+            if s.isTodo, !done, let yesterday = store.earlierDoneDays(s).first {
+                Button { store.markDone(s, on: yesterday) } label: {
+                    Label("Done yesterday", systemImage: "checkmark")
+                        .font(.system(size: sizes.pt(.meta), weight: .medium))
+                        .foregroundStyle(Palette.done)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Palette.done.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("Mark it done on yesterday, so it counts there and not today")
+                .padding(.top, 2)
+            }
+    }
+
+    @ViewBuilder private func actions(done: Bool) -> some View {
             if !done && s.scheduledTaskId == nil {
                 let held = store.isOnHold(s)
-                if !held {
+                if !held && !s.isTodo {
                     IconButton(symbol: store.isPinned(s) ? "pin.slash.fill" : "pin.fill",
                                help: store.isPinned(s) ? "Unpin" : "Pin to In progress, however long it sits",
                                tint: Palette.active) {
@@ -220,10 +281,6 @@ struct Row: View {
                            help: done ? "Undo" : "Mark done",
                            tint: done ? Palette.needsYou : Palette.done) { store.toggleDone(s) }
             }
-        }
-        .contextMenu {
-            if !s.deleted && s.scheduledTaskId == nil { corrections }
-        }
     }
 
     // Right-click: set straight what the panel got wrong about a task.
@@ -250,6 +307,7 @@ struct Row: View {
 
     // Where it runs; the ticket's status joins it as plain text when there's no Jira link for it.
     private var meta: String {
+        if s.isTodo { return "" }
         let ticket = store.ticket(for: s).flatMap { store.ticketURL($0) } == nil ? store.ticketStatus(s) : nil
         return [s.project, s.branch, ticket].compactMap { $0 }.joined(separator: " · ")
     }
@@ -269,6 +327,7 @@ struct Row: View {
     private var metaTail: String {
         if s.deleted { return "deleted" }
         let carried = s.lastActivity < Calendar.current.startOfDay(for: Date()) && !store.isDone(s) ? " · carried over" : ""
+        if s.isTodo { return "added " + relative(s.startedAt ?? s.lastActivity) + carried }
         return relative(s.lastActivity) + carried
     }
 }
@@ -351,5 +410,47 @@ struct SectionHeader: View {
         .canvas()
         .contentShape(Rectangle())
         .onTapGesture { if collapsible { toggle() } }
+    }
+}
+
+// A to-do's title and note, for adding one or editing it. Return saves; Escape cancels.
+struct TodoEditor: View {
+    @ObservedObject private var sizes = TextSizes.shared
+    @State var title: String
+    @State var note: String
+    let saveLabel: String
+    let save: (String, String) -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    private var trimmed: (String, String) {
+        (title.trimmingCharacters(in: .whitespacesAndNewlines), note.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("What needs doing?", text: $title)
+                .textFieldStyle(.plain).font(.system(size: sizes.pt(.title), weight: .semibold))
+                .focused($focused)
+                .onSubmit(commit)
+            TextField("", text: $note, prompt: Text("Note (optional)").foregroundColor(Color(nsColor: .placeholderTextColor)),
+                      axis: .vertical)
+                .textFieldStyle(.plain).font(.system(size: sizes.pt(.detail))).foregroundStyle(.secondary)
+                .lineLimit(1...4)
+            HStack(spacing: 10) {
+                Spacer()
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                Button(saveLabel, action: commit).keyboardShortcut(.defaultAction)
+                    .disabled(trimmed.0.isEmpty)
+            }
+            .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
+        }
+        .onAppear { DispatchQueue.main.async { focused = true } }
+    }
+
+    private func commit() {
+        let (t, n) = trimmed
+        guard !t.isEmpty else { return }
+        save(t, n)
     }
 }

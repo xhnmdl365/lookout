@@ -28,6 +28,8 @@ final class Store: ObservableObject {
     @Published var runs: [JudgeRun] = []
     @Published var days: [String] = []        // snapshot days, oldest first
     @Published var summarizing: String?       // the day Claude is summarizing
+    @Published var todos: [Todo] = []         // the user's own to-dos, kept in todos.json
+    @Published var addingTodo = false         // the new to-do form is open
     // Triage is opt-in: each run is a `claude -p` call that counts toward the user's plan. Off,
     // its button, verdicts and suggestions are gone, and earlier verdicts close nothing.
     @Published var triageEnabled = UserDefaults.standard.bool(forKey: "triageEnabled") {
@@ -71,6 +73,7 @@ final class Store: ObservableObject {
             m.doneAt = [:]
             manual = m
         }
+        if let data = try? Data(contentsOf: todosURL) { todos = (try? JSONDecoder().decode([Todo].self, from: data)) ?? [] }
         if let data = try? Data(contentsOf: judgeURL) { judge = try? JSONDecoder().decode(JudgeFile.self, from: data) }
         if let text = try? String(contentsOf: judgeHistoryURL, encoding: .utf8) {
             runs = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(JudgeRun.self, from: Data($0.utf8)) }
@@ -238,6 +241,7 @@ final class Store: ObservableObject {
     // Desktop sessions open in the app; terminal ones switch to their Terminal tab when one
     // is running, else resume in a new tab. Never starts a second copy of a running session.
     func open(_ id: String) {
+        guard !id.hasPrefix("todo_") else { return }  // a to-do has no session to open
         guard !id.hasPrefix("cli_") else {
             guard let s = sessions.first(where: { $0.id == id }), !s.deleted, let uuid = s.cliId else { return }
             let newest = sessions.filter { $0.isTerminal && !$0.deleted && $0.runCwd == s.runCwd }
@@ -264,14 +268,14 @@ final class Store: ObservableObject {
 
     // Layer 1 rules, plus layer 2 verdicts from the last Claude run.
     private func apply(_ loaded: [Session], deletedAt: [String: Double]) {
-        var all = loaded
+        var all = loaded + todos.map(todoSession)
         var known = manual.known ?? [:]
         var marks = manual.marks ?? [:]
         let dismissed = manual.dismissed ?? []
         let now = Date().timeIntervalSince1970
         let ids = Set(loaded.map(\.id))
 
-        for s in loaded where !s.archived && s.scheduledTaskId == nil {
+        for s in loaded where !s.archived && s.scheduledTaskId == nil && !s.isTodo {
             known[s.id] = Known(title: s.title, cwd: s.cwd)
         }
         // Tracked sessions whose file is gone were deleted.
@@ -376,6 +380,69 @@ final class Store: ObservableObject {
         }
     }
 
+    // MARK: To-dos
+
+    func todoSession(_ t: Todo) -> Session {
+        Session(id: t.id, cliId: nil, title: t.title, cwd: "", runCwd: "",
+                lastActivity: Date(timeIntervalSince1970: t.editedAt), status: nil,
+                detail: t.note.flatMap { $0.isEmpty ? nil : $0 }, needs: nil, scheduledTaskId: nil, prs: [],
+                archived: false, deleted: false, startedAt: Date(timeIntervalSince1970: t.createdAt))
+    }
+
+    func addTodo(title: String, note: String) {
+        let now = Date().timeIntervalSince1970
+        todos.append(Todo(id: "todo_" + UUID().uuidString.lowercased(), title: title, note: note.isEmpty ? nil : note,
+                          createdAt: now, editedAt: now))
+        addingTodo = false
+        todosChanged()
+    }
+
+    func updateTodo(_ id: String, title: String, note: String) {
+        guard let i = todos.firstIndex(where: { $0.id == id }),
+              todos[i].title != title || (todos[i].note ?? "") != note else { return }
+        todos[i].title = title
+        todos[i].note = note.isEmpty ? nil : note
+        todos[i].editedAt = Date().timeIntervalSince1970
+        todosChanged()
+    }
+
+    func deleteTodo(_ id: String) {
+        todos.removeAll { $0.id == id }
+        manual.marks?[id] = nil
+        manual.onHold?[id] = nil
+        save()
+        todosChanged()
+    }
+
+    // Saves the to-dos and puts them in the list at once, without waiting for the next refresh.
+    private func todosChanged() {
+        if let data = try? JSONEncoder().encode(todos) { try? data.write(to: todosURL) }
+        withAnimation(Motion.change) { sessions = sessions.filter { !$0.isTodo } + todos.map(todoSession) }
+    }
+
+    // MARK: Done on an earlier day
+
+    // The days a task left open from before today could be marked done on, newest first: from
+    // yesterday back to the day it was last touched, at most a week.
+    func earlierDoneDays(_ s: Session) -> [String] {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        guard s.lastActivity < todayStart, !isDone(s), !s.deleted, !s.archived else { return [] }
+        return (1...7).compactMap { Calendar.current.date(byAdding: .day, value: -$0, to: todayStart) }
+            .filter { $0.addingTimeInterval(86400) > s.lastActivity }
+            .map(dayKey)
+    }
+
+    // Marks a task done on an earlier day, for work finished then but not marked: it counts in
+    // that day's record, not today's.
+    func markDone(_ s: Session, on day: String) {
+        let end = dayDate(day).timeIntervalSince1970 + 86400 - 60
+        withAnimation(Motion.change) {
+            manual.marks?[s.id] = Mark(at: min(end, Date().timeIntervalSince1970), reason: reasonManual, auto: false)
+            save()
+        }
+        recordDone(s, on: day)
+    }
+
     // MARK: Corrections
 
     // The user's say on what a task is: "review", "own", or nil to detect it.
@@ -448,7 +515,8 @@ final class Store: ObservableObject {
         let open = sessions.filter { $0.scheduledTaskId == nil && !$0.archived && !$0.deleted && !isDone($0) }
         let d = Derived(open: open,
                         children: Dictionary(grouping: open.filter { $0.parentId != nil }, by: { $0.parentId! }),
-                        terminalShare: open.isEmpty ? 0 : Double(open.filter(\.isTerminal).count) / Double(open.count))
+                        terminalShare: { let sessions = open.filter { !$0.isTodo }
+                            return sessions.isEmpty ? 0 : Double(sessions.filter(\.isTerminal).count) / Double(sessions.count) }())
         derived = d
         return d
     }
@@ -460,6 +528,7 @@ final class Store: ObservableObject {
     func baseSection(_ s: Session) -> String? {
         guard s.scheduledTaskId == nil, !s.archived, !s.deleted, !isDone(s) else { return nil }
         if isOnHold(s) { return "onHold" }
+        if s.isTodo { return "todo" }  // stays until done: a to-do has no activity to go idle by
         if s.waiting && within(s, days: blockedDays) { return "needsYou" }
         if recent(s) { return "active" }
         return "idle"
@@ -500,6 +569,7 @@ final class Store: ObservableObject {
     }
 
     var needsYou: [Session] { top("needsYou") + scheduled.filter(\.waiting) }
+    var todoTasks: [Session] { top("todo") }
     var active: [Session] { top("active") }
     var idle: [Session] { top("idle") }
     var onHold: [Session] { top("onHold") }
@@ -536,6 +606,7 @@ final class Store: ObservableObject {
         if s.deleted { return .gray.opacity(0.4) }
         if isDone(s) { return Palette.done }
         if isOnHold(s) { return Palette.onHold }
+        if s.isTodo { return Palette.todo }
         if s.waiting { return Palette.needsYou }
         if s.scheduledTaskId != nil { return Palette.scheduled }
         return recent(s) ? Palette.active : Palette.idle

@@ -26,6 +26,7 @@ enum Palette {
     static let terminal = Color(red: 0.35, green: 0.55, blue: 0.40) // the Terminal badge
     static let suggestion = Color.purple
     static let review = Color.pink  // the "Team code review" title prefix
+    static let todo = Color.mint    // to-dos the user added by hand
 }
 
 // The kinds of text whose size the user can set. Smaller text that goes with a kind (the
@@ -146,10 +147,21 @@ struct SourceBadge: View {
     @ObservedObject private var sizes = TextSizes.shared
     let terminal: Bool
     var quiet = false
+    var todo = false  // the user's own to-do: always its own pill, so it never reads as a Claude task
 
     var body: some View {
         let color = terminal ? Palette.terminal : Palette.claude
-        if quiet {
+        if todo {
+            HStack(spacing: 3) {
+                Image(systemName: "checklist").font(.system(size: sizes.pt(.meta, -2), weight: .semibold))
+                Text("To-do").font(.system(size: sizes.pt(.meta, -1), weight: .semibold))
+            }
+            .foregroundStyle(Palette.todo)
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Capsule().fill(Palette.todo.opacity(0.16)))
+            .fixedSize()
+            .help("A to-do you added")
+        } else if quiet {
             Image(systemName: terminal ? "terminal" : "macwindow")
                 .font(.system(size: sizes.pt(.meta, -0.5)))
                 .foregroundStyle(.tertiary)
