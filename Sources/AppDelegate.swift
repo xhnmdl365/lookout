@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyData()  // before anything creates the new data folder
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Claude Tasks")
+        statusItem.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Lookout")
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Panel", action: #selector(showPanel), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 600),
                         styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow, .nonactivatingPanel],
                         backing: .buffered, defer: false)
-        panel.title = "Claude Tasks"
+        panel.title = "Lookout"
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false

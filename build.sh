@@ -1,10 +1,10 @@
 #!/bin/zsh
-# Builds ClaudeTasks.app next to this script.
+# Builds Lookout.app next to this script.
 set -e
 cd "$(dirname "$0")"
-A=ClaudeTasks.app/Contents
+A=Lookout.app/Contents
 mkdir -p $A/MacOS $A/Resources
-swiftc -swift-version 5 -O -o $A/MacOS/ClaudeTasks Sources/*.swift
+swiftc -swift-version 5 -O -o $A/MacOS/Lookout Sources/*.swift
 cp Info.plist $A/Info.plist
 cp judge-prompt.md $A/Resources/
-codesign --force -s - ClaudeTasks.app
+codesign --force -s - Lookout.app

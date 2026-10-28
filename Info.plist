@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Claude Tasks</string>
+	<string>Lookout</string>
 	<key>CFBundleExecutable</key>
-	<string>ClaudeTasks</string>
+	<string>Lookout</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.xhnmdl365.claudetasks</string>
 	<key>CFBundleName</key>
-	<string>ClaudeTasks</string>
+	<string>Lookout</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

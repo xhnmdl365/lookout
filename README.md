@@ -1,4 +1,4 @@
-# Claude Tasks
+# Lookout
 
 A small floating panel for macOS that turns your Claude Code sessions into a task list, so you
 can see at a glance what you're working on, what's waiting on you, and what's done, and jump
@@ -121,7 +121,7 @@ acli jira auth login --web
 
 ```bash
 ./build.sh
-open ClaudeTasks.app
+open Lookout.app
 ```
 
 The panel stays on top of other windows. Closing it only hides it; open the app again (or use
