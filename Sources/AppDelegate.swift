@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // look without screen-recording permission. It draws an offscreen copy of the panel, so the
     // user's own panel never moves. A number in the file renders at that height; the word
     // "actions" shows every row's hover buttons, "settings" the settings page, "yesterday"
-    // the latest past day, and "calendar" the day picker on its own.
+    // the latest past day, "calendar" the day picker on its own, and "w420" a width of 420.
     @objc func renderIfAsked() {
         // A `triage-now` file runs Triage, over every listed task when it says "all"; "dry" only
         // writes the task list Claude would get.
@@ -69,7 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard renderWindow == nil, let request = try? String(contentsOf: trigger, encoding: .utf8) else { return }
         try? FileManager.default.removeItem(at: trigger)
         let words = request.split(whereSeparator: \.isWhitespace)
-        let size = NSSize(width: panel.frame.width,
+        let width = words.first { $0.hasPrefix("w") }.flatMap { Double($0.dropFirst()) } ?? panel.frame.width
+        let size = NSSize(width: width,
                           height: words.compactMap { Double($0) }.first ?? panel.contentView?.bounds.height ?? 600)
         // Borderless windows aren't kept on screen, so this one draws far off it.
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size),

@@ -26,7 +26,7 @@ enum Palette {
     static let terminal = Color(red: 0.35, green: 0.55, blue: 0.40) // the Terminal badge
     static let suggestion = Color.purple
     static let review = Color.pink  // the "Team code review" title prefix
-    static let todo = Color.mint    // to-dos the user added by hand
+    static let todo = Color(red: 0.12, green: 0.64, blue: 0.54)  // to-dos the user added by hand; deep enough to read as text
 }
 
 // The kinds of text whose size the user can set. Smaller text that goes with a kind (the
@@ -185,29 +185,51 @@ struct SourceBadge: View {
     }
 }
 
-// The Triage button: a compact pill in Claude's coral.
-struct TriageButton: View {
-    let running: Bool
+// The header's controls share one height and shape: a pill, filled in its colour for the main
+// action, tinted for the others; or, for an icon alone, a disc of the same height.
+let headerControlHeight: CGFloat = 24
+
+struct PillButton: View {
+    let title: String?  // nil: the icon alone, in a disc
+    var symbol: String? = nil
+    let color: Color
+    var filled = false
+    var busy = false
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 3) {
-                if running {
-                    ProgressView().controlSize(.mini).tint(.white).scaleEffect(0.8).frame(width: 10, height: 10)
-                } else {
-                    Image(systemName: "sparkles").font(.system(size: 9.5, weight: .semibold))
+            HStack(spacing: 4) {
+                if busy {
+                    ProgressView().controlSize(.mini).tint(filled ? .white : color).scaleEffect(0.8).frame(width: 10, height: 10)
+                } else if let symbol {
+                    Image(systemName: symbol).font(.system(size: title == nil ? 11 : 9.5, weight: .bold))
                 }
-                Text(running ? "Triaging…" : "Triage").font(.system(size: 11, weight: .semibold))
+                if let title { Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1) }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8).padding(.vertical, 3.5)
-            .background(Capsule().fill(Palette.claude.opacity(running ? 0.7 : hovering ? 0.88 : 1)))
+            .foregroundStyle(filled ? Color.white : color)
+            .padding(.horizontal, title == nil ? 0 : 9)
+            .frame(width: title == nil ? headerControlHeight : nil, height: headerControlHeight)
+            .background(Capsule().fill(filled ? color.opacity(busy ? 0.7 : hovering ? 0.88 : 1)
+                                              : color.opacity(hovering ? 0.24 : 0.13)))
+            .contentShape(Capsule())
+            .fixedSize()
         }
         .buttonStyle(.plain)
-        .disabled(running)
         .onHover { hovering = $0 }
+    }
+}
+
+// The Triage button: the header's one filled pill, in Claude's coral.
+struct TriageButton: View {
+    let running: Bool
+    let action: () -> Void
+
+    var body: some View {
+        PillButton(title: running ? "Triaging…" : "Triage", symbol: "sparkles", color: Palette.claude,
+                   filled: true, busy: running, action: action)
+            .disabled(running)
     }
 }
 

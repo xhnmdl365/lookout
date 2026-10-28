@@ -62,7 +62,7 @@ struct ContentView: View {
                             .foregroundStyle(spec.items.isEmpty ? Color.secondary.opacity(0.45) : spec.tint)
                         Text(spec.short)
                             .font(.system(size: sizes.pt(.count, -7), weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-                            .minimumScaleFactor(0.75)  // a narrow panel shrinks the labels rather than running them together
+                            .minimumScaleFactor(0.65)  // a narrow panel shrinks the labels rather than running them together
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 5).padding(.horizontal, 1.5)
                     .contentShape(Rectangle())
@@ -140,6 +140,7 @@ struct ContentView: View {
                     Text(viewDay == nil ? "Today" : "History")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
+                .fixedSize()  // the date keeps its one line; the controls on the right give way instead
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -147,33 +148,48 @@ struct ContentView: View {
             .popover(isPresented: $picking, arrowEdge: .bottom) { dayPicker }
             IconButton(symbol: "chevron.right", help: "Next day") { viewDay = nextDay }
                 .disabled(viewDay == nil)
-            Spacer()
-            if showSettings {
-                Button("Done") { showSettings = false }
-                    .buttonStyle(.borderless).font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.claude)
-            } else {
-            IconButton(symbol: "plus", help: "Add a to-do of your own") {
-                withAnimation(Motion.change) { store.addingTodo = true }
-                reveal("To-do")
+            Spacer(minLength: 6)
+            // Wide enough, the to-do button says what it adds; narrow, it keeps just its icon.
+            ViewThatFits(in: .horizontal) {
+                headerControls(compact: false)
+                headerControls(compact: true)
             }
-            IconButton(symbol: "gearshape", help: "Settings: AI triage, integrations, text size") { showSettings = true }
-            if viewDay != nil {
-                Button("Back to today") { viewDay = nil }
-                    .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
-            } else if store.triageEnabled {
-                TriageButton(running: store.judging) { store.runJudge() }
-                    .hoverHint(judgeHelp)
-                    .contextMenu {
-                        Button("Triage All Again") { store.runJudge(all: true) }
-                            .disabled(store.judging)
-                        Button("View Last Run's Steps") { NSWorkspace.shared.open(judgeTraceMDURL) }
-                            .disabled(!FileManager.default.fileExists(atPath: judgeTraceMDURL.path))
-                    }
-            }
-            }
+            .layoutPriority(1)  // measured before the spacer takes what's left
         }
         .padding(.horizontal, 10).padding(.vertical, 9)
+    }
+
+    // The header's right side, one height throughout: the page's own actions as pills (Triage the
+    // only filled one), then settings as a disc at the end.
+    private func headerControls(compact: Bool) -> some View {
+        HStack(spacing: 6) {
+            if showSettings {
+                PillButton(title: "Done", color: Palette.claude) { showSettings = false }
+            } else {
+                if viewDay != nil {
+                    PillButton(title: "Today", symbol: "arrow.uturn.backward", color: Palette.active) { viewDay = nil }
+                        .help("Back to today")
+                } else {
+                    PillButton(title: compact ? nil : "To-do", symbol: "plus", color: Palette.todo) {
+                        withAnimation(Motion.change) { store.addingTodo = true }
+                        reveal("To-do")
+                    }
+                    .help("Add a to-do of your own")
+                    if store.triageEnabled {
+                        TriageButton(running: store.judging) { store.runJudge() }
+                            .hoverHint(judgeHelp)
+                            .contextMenu {
+                                Button("Triage All Again") { store.runJudge(all: true) }
+                                    .disabled(store.judging)
+                                Button("View Last Run's Steps") { NSWorkspace.shared.open(judgeTraceMDURL) }
+                                    .disabled(!FileManager.default.fileExists(atPath: judgeTraceMDURL.path))
+                            }
+                    }
+                }
+                PillButton(title: nil, symbol: "gearshape", color: .secondary) { showSettings = true }
+                    .help("Settings: AI triage, integrations, text size")
+            }
+        }
     }
 
     private var live: some View {
