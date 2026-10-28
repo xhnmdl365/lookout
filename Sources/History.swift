@@ -80,10 +80,11 @@ extension Store {
 
     func summarize(_ day: String) {
         guard summarizing == nil, let snap = loadSnapshot(day), !snap.tasks.isEmpty else { return }
-        // Only what moved that day: finished then, or worked in then. Done ones first, then the
-        // most recently worked in.
+        // Only what was worked in that day. A task marked done then without being touched (an
+        // idle one cleared away, archived, closed by a rule) did no work worth reporting. Done
+        // ones first, then the most recently worked in.
         let start = dayDate(day).timeIntervalSince1970, end = start + 86400
-        let moved = snap.tasks.filter { snap.isDone($0) || (start..<end).contains($0.lastActivity) }
+        let moved = snap.tasks.filter { (start..<end).contains($0.lastActivity) }
             .sorted { (snap.isDone($0) ? 1 : 0, $0.lastActivity) > (snap.isDone($1) ? 1 : 0, $1.lastActivity) }
         guard !moved.isEmpty else { return }
         let rows: [[String: Any]] = moved.map { t in
