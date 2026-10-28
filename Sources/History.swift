@@ -28,9 +28,13 @@ extension Store {
     // Only today's file is ever rewritten from live data, so past days stay as they were.
     func writeTodaySnapshot() {
         func snap(_ s: Session, _ section: String) -> SnapTask {
-            SnapTask(id: s.id, title: s.title, project: s.project, section: section, detail: s.detail,
-                     needs: s.nextStep, doneReason: section == "done" ? mark(s)?.reason : nil,
-                     lastActivity: s.lastActivity.timeIntervalSince1970, deleted: s.deleted)
+            let review = teamReviews.contains(s.id)
+            return SnapTask(id: s.id, title: s.title, project: s.project, section: section, detail: s.detail,
+                            needs: s.nextStep, doneReason: section == "done" ? mark(s)?.reason : nil,
+                            lastActivity: s.lastActivity.timeIntervalSince1970, deleted: s.deleted,
+                            review: review ? true : nil,
+                            ticket: review ? nil : ticketStatus(s) ?? ticket(for: s),
+                            reviewPRs: review ? reviewedTeamPRs(s).map(prLabel) : nil)
         }
         // Flat: nested children are recorded under their own section.
         let open = sessions.compactMap { s in baseSection(s).map { snap(s, $0) } }
@@ -76,23 +80,42 @@ extension Store {
 
     func summarize(_ day: String) {
         guard summarizing == nil, let snap = loadSnapshot(day), !snap.tasks.isEmpty else { return }
-        let rows: [[String: Any]] = snap.tasks.map { t in
-            ["title": t.title, "project": t.project, "section": t.section, "done": snap.isDone(t),
-             "detail": t.detail ?? "", "needs": t.needs ?? "", "doneReason": t.doneReason ?? ""]
+        // Only what moved that day: finished then, or worked in then. Done ones first, then the
+        // most recently worked in.
+        let start = dayDate(day).timeIntervalSince1970, end = start + 86400
+        let moved = snap.tasks.filter { snap.isDone($0) || (start..<end).contains($0.lastActivity) }
+            .sorted { (snap.isDone($0) ? 1 : 0, $0.lastActivity) > (snap.isDone($1) ? 1 : 0, $1.lastActivity) }
+        guard !moved.isEmpty else { return }
+        let rows: [[String: Any]] = moved.map { t in
+            var r: [String: Any] = ["title": t.title, "section": t.section, "done": snap.isDone(t),
+                                    "detail": t.detail ?? "", "needs": t.needs ?? "", "doneReason": t.doneReason ?? ""]
+            if let review = t.review { r["kind"] = review ? "review" : "own work" }
+            if let ticket = t.ticket { r["ticket"] = ticket }
+            if let prs = t.reviewPRs, !prs.isEmpty { r["prs"] = prs }
+            return r
         }
         guard let json = (try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted]))
             .flatMap({ String(data: $0, encoding: .utf8) }) else { return }
         let prompt = """
-        Below is a snapshot (JSON) of the user's Claude Code tasks on \(day). Sections: done = finished \
-        that day, needsYou = waiting on the user, active = in progress, idle = untouched lately, \
-        onHold = parked. The `done` field already includes the user's own corrections; trust it.
+        Below (JSON) are the user's Claude Code tasks that moved on \(day), finished ones first. \
+        `done` already includes the user's own corrections; trust it. `section`: needsYou = waiting \
+        on the user, active = in progress, onHold = parked. `kind` "review" means the user reviewed \
+        a teammate's PR, named in `prs`; when `kind` is missing, a title starting "Code review" or \
+        "Team code review" is a review. `ticket` is the Jira key and its status.
 
-        Write the user a summary of that day for their own reference, in English, at most 80 words, \
-        as up to three bullet points:
-        - what got finished
-        - what moved forward, and what is blocked
-        - what to do first next
-        Use only what the snapshot says; do not invent anything. Output the bullets only, no heading.
+        Write the user a summary of that day for their own reference, in English, one line per item, \
+        no heading, no bullets:
+        - Each of the user's own tasks, in the order given: an emoji, the ticket key when there is \
+        one, a short name, a colon, then one plain sentence on what was done and where it stands, \
+        under 20 words. Emoji: ✅ finished that day; ⛔ blocked or waiting on someone, the user \
+        included; ⏳ still in progress.
+        - All the reviews together on one line: "👀 Reviewed: " and the PRs (or the task names when \
+        no PR is given), comma-separated. Say nothing about how the reviews went.
+        - Last, one line: "Next: " and what to do first, in a few words.
+        Use only what the data says; do not invent anything. Example lines:
+        ✅ PROJ-12 Export dialog: progress bar fixed and merged.
+        ⛔ PROJ-34 Login retry: PR ready, waiting on the team lead's approval.
+        👀 Reviewed: api#82, web#17
 
         \(json)
         """

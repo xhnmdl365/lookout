@@ -40,8 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // A `render-now` file in the data folder saves the panel as render.png, for checking the
     // look without screen-recording permission. It draws an offscreen copy of the panel, so the
     // user's own panel never moves. A number in the file renders at that height; the word
-    // "actions" shows every row's hover buttons, "settings" the settings page, and "yesterday"
-    // the latest past day.
+    // "actions" shows every row's hover buttons, "settings" the settings page, "yesterday"
+    // the latest past day, and "calendar" the day picker on its own.
     @objc func renderIfAsked() {
         // A `triage-now` file runs Triage, over every listed task when it says "all"; "dry" only
         // writes the task list Claude would get.
@@ -49,6 +49,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let words = try? String(contentsOf: triage, encoding: .utf8) {
             try? FileManager.default.removeItem(at: triage)
             store.runJudge(all: words.contains("all"), dry: words.contains("dry"))
+        }
+        // A `summarize-now` file holding a day ("2026-01-31") has Claude summarize it again.
+        let summarizeFile = dataDir.appendingPathComponent("summarize-now")
+        if let day = try? String(contentsOf: summarizeFile, encoding: .utf8) {
+            try? FileManager.default.removeItem(at: summarizeFile)
+            store.summarize(day.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         // A `jump-now` file holding a section title scrolls the next render to that section.
         let jump = dataDir.appendingPathComponent("jump-now")
@@ -66,7 +72,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        let view = NSHostingView(rootView: ContentView(store: store, forRender: true))
+        let today = dayKey(Date())
+        let root = words.contains("calendar")
+            ? AnyView(DayCalendar(recorded: Set(store.days), selected: today, today: today) { _ in }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color(nsColor: .windowBackgroundColor)))
+            : AnyView(ContentView(store: store, forRender: true))
+        let view = NSHostingView(rootView: root)
         window.contentView = view
         window.orderFrontRegardless()
         renderWindow = window

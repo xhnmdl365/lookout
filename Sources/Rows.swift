@@ -259,9 +259,7 @@ struct Row: View {
         if teamReview {
             return store.reviewedTeamPRs(s).prefix(2).compactMap { u in
                 guard let url = URL(string: u) else { return nil }
-                let parts = url.pathComponents  // ["/", owner, repo, "pull", n]
-                let label = parts.count >= 5 ? "\(parts[2])#\(parts[4])" : u
-                return RowLink(label: label, url: url, help: "Open the PR under review on GitHub")
+                return RowLink(label: prLabel(u), url: url, help: "Open the PR under review on GitHub")
             }
         }
         guard let key = store.ticket(for: s), let url = store.ticketURL(key) else { return [] }

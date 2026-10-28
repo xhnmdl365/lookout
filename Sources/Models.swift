@@ -154,6 +154,9 @@ struct SnapTask: Codable, Identifiable {
     var doneReason: String?
     var lastActivity: Double
     var deleted: Bool
+    var review: Bool? = nil        // reviewing a teammate's PR
+    var ticket: String? = nil      // its Jira key and status, e.g. "PROJ-123 In Review"
+    var reviewPRs: [String]? = nil // for a review, the PRs under review, as "repo#12"
 }
 
 struct DaySnapshot: Codable {

@@ -74,6 +74,12 @@ func branchTicketKeys(_ branch: String) -> [String] {
     captures(#"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]{1,9}-\d+)(?![0-9])"#, in: branch).map { $0[1].uppercased() }
 }
 
+// A PR URL as people write it: "repo#12".
+func prLabel(_ url: String) -> String {
+    let parts = URL(string: url)?.pathComponents ?? []  // ["/", owner, repo, "pull", n]
+    return parts.count >= 5 ? "\(parts[2])#\(parts[4])" : url
+}
+
 // A PR ref from a gh command as a URL: "owner/repo#12", or "#12" in the session's own repo.
 func resolveReviewRef(_ ref: String, repo: String?) -> String? {
     if ref.hasPrefix("http") { return captures(#"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)"#, in: ref).first

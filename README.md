@@ -77,7 +77,8 @@ usage, they aren't billed per call. The footer shows today's runs and tokens.
 ### History
 
 Each day's list is kept as a snapshot. Page back with ‹ › to see what was finished and what moved
-that day, with a short summary Claude writes the next morning. Past days only change when you
+that day, with a summary Claude writes the next morning: one line per task you worked on, with
+✅ finished, ⛔ blocked or waiting, ⏳ in progress, and one line for the PRs you reviewed. Past days only change when you
 edit them.
 
 ## Requirements

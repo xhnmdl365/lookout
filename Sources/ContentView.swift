@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var viewDay: String?  // nil: today, live
     @State private var jumpTo: String?   // a section the count strip asked to scroll to
     @State private var showSettings = false
+    @State private var picking = false  // the calendar for jumping to a day is open
 
     private var specs: [SectionSpec] {
         [
@@ -116,17 +117,32 @@ struct ContentView: View {
         .environment(\.forRender, forRender)
     }
 
+    // A calendar of the recorded days, for days too far back to page to.
+    private var dayPicker: some View {
+        DayCalendar(recorded: Set(store.days), selected: viewDay ?? today, today: today) { key in
+            viewDay = key >= today ? nil : key
+            picking = false
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 4) {
             IconButton(symbol: "chevron.left", help: "Previous day") { viewDay = prevDay }
                 .disabled(prevDay == nil)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(dayDate(viewDay ?? today).formatted(
-                    Date.FormatStyle(locale: english).weekday(.abbreviated).month(.abbreviated).day()))
-                    .font(.system(size: 14, weight: .bold))
-                Text(viewDay == nil ? "Today" : "History")
-                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+            // The date opens a calendar, for days too far back to page to.
+            Button { picking = true } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(dayDate(viewDay ?? today).formatted(
+                        Date.FormatStyle(locale: english).weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(.system(size: 14, weight: .bold))
+                    Text(viewDay == nil ? "Today" : "History")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Pick a day")
+            .popover(isPresented: $picking, arrowEdge: .bottom) { dayPicker }
             IconButton(symbol: "chevron.right", help: "Next day") { viewDay = nextDay }
                 .disabled(viewDay == nil)
             Spacer()

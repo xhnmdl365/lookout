@@ -49,7 +49,8 @@ struct SummaryBox: View {
     }
 }
 
-// Claude writes the summary in Markdown: "- " lines become bullets with a hanging indent, and
+// Claude writes the summary in Markdown: "- " lines and lines led by a status emoji get a
+// hanging indent, and
 // **bold**, *italic* and `code` are drawn rather than shown as symbols.
 struct SummaryText: View {
     let text: String
@@ -64,6 +65,14 @@ struct SummaryText: View {
                         Text("•").foregroundStyle(.secondary)
                         inline(item)
                     }
+                } else if let mark = line.first, mark.unicodeScalars.first?.properties.isEmojiPresentation == true {
+                    // A status emoji leads its line; wrapped text lines up after it.
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(String(mark))
+                        inline(line.dropFirst().trimmingCharacters(in: .whitespaces))
+                    }
+                } else if line.hasPrefix("Next:") {
+                    inline("**Next:**" + line.dropFirst("Next:".count))
                 } else {
                     inline(line.hasPrefix("#") ? "**" + line.drop { $0 == "#" || $0 == " " } + "**" : line)
                 }
@@ -150,5 +159,118 @@ struct DayView: View {
                 SectionHeader(title: title, count: items.count, tint: tint, collapsible: false, open: true, toggle: {})
             }
         }
+    }
+}
+
+// A month calendar for jumping to a day. Days with a record can be picked and carry a dot;
+// the rest are greyed out. Today is ringed; the day on screen is filled.
+struct DayCalendar: View {
+    let recorded: Set<String>  // days with a snapshot, as "yyyy-MM-dd"
+    let selected: String
+    let today: String
+    let pick: (String) -> Void
+    @State private var month: Date
+
+    init(recorded: Set<String>, selected: String, today: String, pick: @escaping (String) -> Void) {
+        self.recorded = recorded
+        self.selected = selected
+        self.today = today
+        self.pick = pick
+        _month = State(initialValue: DayCalendar.calendar.dateInterval(of: .month, for: dayDate(selected))?.start ?? Date())
+    }
+
+    // English names, but the user's own first day of the week.
+    private static var calendar: Calendar {
+        var c = Calendar.current
+        let firstWeekday = c.firstWeekday
+        c.locale = english
+        c.firstWeekday = firstWeekday
+        return c
+    }
+
+    private var firstMonth: Date {
+        let first = recorded.min().map(dayDate) ?? Date()
+        return Self.calendar.dateInterval(of: .month, for: first)?.start ?? first
+    }
+    private var thisMonth: Date { Self.calendar.dateInterval(of: .month, for: Date())?.start ?? Date() }
+
+    // The month's days as keys, after blanks for the weekdays before the 1st.
+    private var cells: [String?] {
+        let cal = Self.calendar
+        let count = cal.range(of: .day, in: .month, for: month)?.count ?? 30
+        let lead = (cal.component(.weekday, from: month) - cal.firstWeekday + 7) % 7
+        let days = (0..<count).compactMap { cal.date(byAdding: .day, value: $0, to: month).map(dayKey) }
+        return Array(repeating: nil, count: lead) + days
+    }
+
+    private var weekdays: [String] {
+        let cal = Self.calendar
+        let symbols = cal.shortStandaloneWeekdaySymbols.map { String($0.prefix(2)) }
+        return Array(symbols[(cal.firstWeekday - 1)...] + symbols[..<(cal.firstWeekday - 1)])
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 2) {
+                Text(month.formatted(Date.FormatStyle(locale: english).month(.wide).year()))
+                    .font(.system(size: 13, weight: .bold))
+                Spacer()
+                IconButton(symbol: "chevron.left", help: "Previous month") { step(-1) }
+                    .disabled(month <= firstMonth)
+                IconButton(symbol: "chevron.right", help: "Next month") { step(1) }
+                    .disabled(month >= thisMonth)
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 2), count: 7), spacing: 2) {
+                ForEach(weekdays, id: \.self) {
+                    Text($0).font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary).frame(height: 18)
+                }
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, key in
+                    if let key { DayCell(key: key, recorded: recorded.contains(key) || key == today,
+                                         selected: key == selected, today: key == today) { pick(key) } }
+                    else { Color.clear.frame(height: 28) }
+                }
+            }
+            Text("\(recorded.count) day\(recorded.count == 1 ? "" : "s") recorded")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(width: 228)
+    }
+
+    private func step(_ months: Int) {
+        if let m = Self.calendar.date(byAdding: .month, value: months, to: month) {
+            withAnimation(Motion.change) { month = m }
+        }
+    }
+}
+
+private struct DayCell: View {
+    let key: String
+    let recorded: Bool
+    let selected: Bool
+    let today: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 1) {
+                Text(String(Int(key.suffix(2)) ?? 0))
+                    .font(.system(size: 12, weight: selected || today ? .semibold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(selected ? AnyShapeStyle(.white) : recorded ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                Circle().fill(selected ? Color.white.opacity(0.8) : Palette.claude)
+                    .frame(width: 3.5, height: 3.5)
+                    .opacity(recorded && !today ? 1 : 0)
+            }
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(selected ? Palette.claude : hovering && recorded ? Palette.claude.opacity(0.12) : .clear))
+            .overlay(Circle().strokeBorder(Palette.claude.opacity(today && !selected ? 0.8 : 0), lineWidth: 1.2))
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!recorded)
+        .onHover { hovering = $0 }
     }
 }
