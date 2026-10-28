@@ -12,6 +12,7 @@ let configURL = dataDir.appendingPathComponent("config.json")
 let stateURL = dataDir.appendingPathComponent("state.json")
 let openTasksURL = dataDir.appendingPathComponent("open-tasks.json")
 let todosURL = dataDir.appendingPathComponent("todos.json")
+let summaryInputURL = dataDir.appendingPathComponent("summary-input.json")  // what the last day summary was given
 let judgeURL = dataDir.appendingPathComponent("judge.json")
 let judgeRawURL = dataDir.appendingPathComponent("judge-raw.json")
 let judgeHistoryURL = dataDir.appendingPathComponent("judge-history.jsonl")

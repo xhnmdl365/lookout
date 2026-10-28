@@ -156,6 +156,49 @@ func scanTranscript(_ url: URL, from facts: TranscriptFacts) -> TranscriptFacts 
     return f
 }
 
+// What a session did on one day, from its transcript: the recap Claude wrote at the end of each
+// turn (Claude app sessions close every turn with one), and the prompts the user typed (all a
+// terminal session has to go on). Each at most 12, the first 2 and the last 10: how the day began
+// and where it got to.
+func dayTrail(_ url: URL, from start: Date, to end: Date) -> (recaps: [String], prompts: [String]) {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return ([], []) }
+    defer { try? h.close() }
+    let precise = ISO8601DateFormatter()
+    precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let plain = ISO8601DateFormatter()
+    var recaps: [String] = [], prompts: [String] = []
+    var carry = Data()
+    var more = true
+    while more {
+        autoreleasepool {
+            guard let block = try? h.read(upToCount: 4 << 20), !block.isEmpty else { more = false; return }
+            let data = carry + block
+            guard let last = data.lastIndex(of: UInt8(ascii: "\n")) else { carry = data; return }
+            carry = Data(data[(last + 1)...])
+            for line in String(decoding: data[...last], as: UTF8.self).split(separator: "\n")
+            where line.contains("__wrap_up") || line.contains("\"type\":\"user\"") {
+                guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                      let stamp = o["timestamp"] as? String, let at = precise.date(from: stamp) ?? plain.date(from: stamp),
+                      at >= start, at < end else { continue }
+                let content = (o["message"] as? [String: Any])?["content"]
+                if o["type"] as? String == "assistant" {
+                    for c in content as? [[String: Any]] ?? [] where (c["name"] as? String)?.hasSuffix("__wrap_up") == true {
+                        if let r = (c["input"] as? [String: Any])?["recap"] as? String, !r.isEmpty { recaps.append(r) }
+                    }
+                } else if o["type"] as? String == "user", (o["isMeta"] as? Bool) != true {
+                    // Typed text only: tool results and command wrappers aren't the user asking.
+                    let text = (content as? String)
+                        ?? (content as? [[String: Any]])?.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+                            .joined(separator: " ")
+                    if let text, !text.isEmpty, !text.hasPrefix("<") { prompts.append(String(text.prefix(300))) }
+                }
+            }
+        }
+    }
+    func keep(_ a: [String]) -> [String] { a.count <= 12 ? a : Array(a.prefix(2) + a.suffix(10)) }
+    return (keep(recaps), keep(prompts))
+}
+
 // Who wrote a transcript, from its first lines: "cli" is an interactive terminal run,
 // "claude-desktop" the desktop app. Desktop transcripts share the folder and are skipped.
 func transcriptEntrypoint(_ url: URL) -> String? {

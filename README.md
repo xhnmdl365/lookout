@@ -88,7 +88,9 @@ usage, they aren't billed per call. The footer shows today's runs and tokens.
 ### History
 
 Each day's list is kept as a snapshot. Page back with ‹ › to see what was finished and what moved
-that day, with a summary Claude writes the next morning: one line per task you worked on, with
+that day, with a summary Claude writes the next morning from what each session did that day (the
+recap Claude wrote after each turn, or what you asked in a terminal session), with each task's ticket
+status and the state of the PRs it mentioned that day: one line per task you worked on, with
 ✅ finished, ⛔ blocked or waiting, ⏳ in progress, and one line for the PRs you reviewed. Past days only change when you
 edit them.
 

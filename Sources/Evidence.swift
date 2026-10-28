@@ -74,6 +74,20 @@ func branchTicketKeys(_ branch: String) -> [String] {
     captures(#"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]{1,9}-\d+)(?![0-9])"#, in: branch).map { $0[1].uppercased() }
 }
 
+// One PR's state, merge or close time, author, branch, title and reviewers, from gh.
+func prInfo(gh: String, url: String) -> PRInfo? {
+    guard let out = run(gh, ["pr", "view", url, "--json", "state,mergedAt,closedAt,author,headRefName,title,reviewRequests,latestReviews"]),
+          let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
+          let state = o["state"] as? String else { return nil }
+    let iso = ISO8601DateFormatter()
+    let end = (o["mergedAt"] as? String).flatMap(iso.date) ?? (o["closedAt"] as? String).flatMap(iso.date)
+    let loginOf = { (d: Any?) in (d as? [String: Any])?["login"] as? String }
+    let requested = (o["reviewRequests"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
+    let reviewed = (o["latestReviews"] as? [[String: Any]] ?? []).compactMap { loginOf($0["author"]) }
+    return PRInfo(state: state, endedAt: end?.timeIntervalSince1970, author: loginOf(o["author"]),
+                  branch: o["headRefName"] as? String, title: o["title"] as? String, reviewers: Set(requested + reviewed))
+}
+
 // A PR URL as people write it: "repo#12".
 func prLabel(_ url: String) -> String {
     let parts = URL(string: url)?.pathComponents ?? []  // ["/", owner, repo, "pull", n]
@@ -270,22 +284,8 @@ extension Store {
             let urls = Set(open.flatMap { self.taskPRs($0, repos: repos) })
                 .filter { gh != nil && (live[$0] == nil || live[$0]?.state == "OPEN") }
             var found: [String: PRInfo] = [:]
-            let iso = ISO8601DateFormatter()
             for u in urls {
-                guard let gh, let out = run(gh, ["pr", "view", u, "--json",
-                                                 "state,mergedAt,closedAt,author,headRefName,title,reviewRequests,latestReviews"]),
-                      let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
-                      let state = o["state"] as? String else {
-                    found[u] = PRInfo(state: "UNKNOWN")
-                    continue
-                }
-                let end = (o["mergedAt"] as? String).flatMap(iso.date) ?? (o["closedAt"] as? String).flatMap(iso.date)
-                let loginOf = { (d: Any?) in (d as? [String: Any])?["login"] as? String }
-                let requested = (o["reviewRequests"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
-                let reviewed = (o["latestReviews"] as? [[String: Any]] ?? []).compactMap { loginOf($0["author"]) }
-                found[u] = PRInfo(state: state, endedAt: end?.timeIntervalSince1970, author: loginOf(o["author"]),
-                                  branch: o["headRefName"] as? String, title: o["title"] as? String,
-                                  reviewers: Set(requested + reviewed))
+                found[u] = gh.flatMap { prInfo(gh: $0, url: u) } ?? PRInfo(state: "UNKNOWN")
             }
             // Tickets, read with the Atlassian CLI when it is installed. Their status can move
             // either way, so every one is read again each time; keys Jira doesn't know are dropped.

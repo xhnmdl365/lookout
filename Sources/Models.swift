@@ -168,7 +168,7 @@ struct SnapTask: Codable, Identifiable {
     var doneReason: String?
     var lastActivity: Double
     var deleted: Bool
-    var review: Bool? = nil        // reviewing a teammate's PR
+    var review: Bool? = nil        // reviewing a teammate's PR (true) or own work (false); missing in older records
     var ticket: String? = nil      // its Jira key and status, e.g. "PROJ-123 In Review"
     var reviewPRs: [String]? = nil // for a review, the PRs under review, as "repo#12"
     var todo: Bool? = nil          // a to-do the user added by hand
