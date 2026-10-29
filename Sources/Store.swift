@@ -58,7 +58,7 @@ final class Store: ObservableObject {
     private var sessionCache: [String: (mtime: Double, session: Session)] = [:]
     // Transcript path -> the question it left open, and what it says about the work, at that
     // mtime. Touched only on loadQueue.
-    private var askCache: [String: (mtime: Double, ask: String?, facts: TranscriptFacts)] = [:]
+    private var askCache: [String: (mtime: Double, tail: TranscriptTail, facts: TranscriptFacts)] = [:]
     // Whether a load has finished; the first one skips reading whole transcripts, so the list
     // shows at once and the next pass fills in. Touched only on loadQueue.
     private var loadedOnce = false
@@ -194,7 +194,8 @@ final class Store: ObservableObject {
         }
     }
 
-    // Adds the question a desktop session's last turn left open, and its branch and reviewed PRs,
+    // Adds the question a desktop session's last turn left open, whether the user stopped that
+    // turn, and its branch and reviewed PRs,
     // read again only when its transcript changes. Archived and scheduled sessions are skipped:
     // nobody's waiting there.
     private func withPendingAsk(_ s: Session) -> Session {
@@ -202,18 +203,19 @@ final class Store: ObservableObject {
         let url = transcriptURL(cwd: s.runCwd, cliId: cli)
         let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate?.timeIntervalSince1970 ?? 0
-        let ask: String?, facts: TranscriptFacts
+        let tail: TranscriptTail, facts: TranscriptFacts
         if let cached = askCache[url.path], cached.mtime == mtime {
-            (ask, facts) = (cached.ask, cached.facts)
+            (tail, facts) = (cached.tail, cached.facts)
         } else if !loadedOnce && askCache[url.path] == nil {
-            (ask, facts) = (pendingQuestion(in: url), TranscriptFacts())  // not cached: read in full next pass
+            (tail, facts) = (readTail(of: url), TranscriptFacts())  // not cached: read in full next pass
         } else {
-            ask = pendingQuestion(in: url)
+            tail = readTail(of: url)
             facts = scanTranscript(url, from: askCache[url.path]?.facts ?? TranscriptFacts())
-            askCache[url.path] = (mtime, ask, facts)
+            askCache[url.path] = (mtime, tail, facts)
         }
         var s = s
-        s.pendingAsk = ask
+        s.pendingAsk = tail.ask
+        if tail.interrupted { s.turnOpen = false }  // stopped: the record still shows the turn open
         s.gitBranch = facts.branch
         s.workBranches = facts.branches
         s.reviewRefs = facts.reviewRefs

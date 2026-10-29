@@ -9,16 +9,22 @@ func transcriptURL(cwd: String, cliId: String) -> URL {
     return projectsRoot.appendingPathComponent(folder).appendingPathComponent("\(cliId).jsonl")
 }
 
-// The question a session's last turn left open: its closing wrap-up asked something (or said it
-// is blocked on the user), and no message from the user has come since. Read from the end of the
-// transcript only.
-func pendingQuestion(in url: URL) -> String? {
-    guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+// What the end of a desktop session's transcript says. `ask`: the question its last turn left
+// open, when its closing wrap-up asked something (or said it is blocked on the user) and no
+// message from the user has come since. `interrupted`: the user stopped the last turn, which
+// the session record doesn't show as the turn ending.
+struct TranscriptTail {
+    var ask: String?
+    var interrupted = false
+}
+
+func readTail(of url: URL) -> TranscriptTail {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return TranscriptTail() }
     defer { try? h.close() }
     let size = (try? h.seekToEnd()) ?? 0
     try? h.seek(toOffset: size > 300_000 ? size - 300_000 : 0)
     let tail = String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
-    var pending: String?
+    var pending: String?, interrupted = false
     for line in tail.split(separator: "\n") {
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         let content = (o["message"] as? [String: Any])?["content"]
@@ -30,12 +36,15 @@ func pendingQuestion(in url: URL) -> String? {
             }
         } else if o["type"] as? String == "user", (o["isMeta"] as? Bool) != true {
             // A reply typed by the user answers it; tool results and system notices don't.
-            let typed = (content as? String).map { !$0.hasPrefix("<") }
-                ?? (content as? [[String: Any]])?.contains { $0["type"] as? String == "text" } ?? false
-            if typed { pending = nil }
+            let text = (content as? String)
+                ?? (content as? [[String: Any]])?.first { $0["type"] as? String == "text" }?["text"] as? String
+            if let text, !text.hasPrefix("<") {
+                pending = nil
+                interrupted = text.hasPrefix("[Request interrupted")
+            }
         }
     }
-    return pending
+    return TranscriptTail(ask: pending, interrupted: interrupted)
 }
 
 // PRs a shell command looks at with `gh pr <subcommand> <n or URL>`, with `-R/--repo
