@@ -44,8 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // look without screen-recording permission. It draws an offscreen copy of the panel, so the
     // user's own panel never moves. A number in the file renders at that height; the word
     // "actions" shows every row's hover buttons, "settings" the settings page, "yesterday"
-    // the latest past day, "calendar" the day picker on its own, "w420" a width of 420, and
-    // "q:scorm" the results of searching for "scorm".
+    // the latest past day, "calendar" the day picker on its own, "w420" a width of 420,
+    // "q:scorm" the results of searching for "scorm", and "dark" or "light" that theme.
     @objc func renderIfAsked() {
         // A `triage-now` file runs Triage, over every listed task when it says "all"; "dry" only
         // writes the task list Claude would get.
@@ -77,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        if words.contains("dark") { window.appearance = Theme.dark.appearance }
+        if words.contains("light") { window.appearance = Theme.light.appearance }
         let today = dayKey(Date())
         let root = words.contains("calendar")
             ? AnyView(DayCalendar(recorded: Set(store.days), selected: today, today: today) { _ in }
@@ -144,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         migrateLegacyData()  // before anything creates the new data folder
         buildMainMenu()
+        ThemeSetting.shared.apply()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Lookout")
         let menu = NSMenu()

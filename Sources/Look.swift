@@ -104,6 +104,38 @@ final class TextSizes: ObservableObject {
     }
 }
 
+// Light or dark: as the system is set, or always one of them. Every colour in the panel is a
+// system colour or a tint over one, so setting the app's appearance is all a theme takes.
+enum Theme: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    var appearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+// The user's theme, kept in UserDefaults and applied to the whole app as soon as it changes.
+final class ThemeSetting: ObservableObject {
+    static let shared = ThemeSetting()
+    private let key = "theme"
+    @Published var theme: Theme {
+        didSet {
+            UserDefaults.standard.set(theme.rawValue, forKey: key)
+            apply()
+        }
+    }
+
+    init() { theme = UserDefaults.standard.string(forKey: key).flatMap(Theme.init) ?? .system }
+
+    func apply() { NSApp.appearance = theme.appearance }
+}
+
 // Puts the enclosing scroll view on thin overlay scrollers that show only while scrolling,
 // whatever the system's "Show scroll bars" setting says, so the list has no permanent bar.
 struct OverlayScrollers: NSViewRepresentable {

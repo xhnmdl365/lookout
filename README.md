@@ -174,7 +174,8 @@ Personal settings go in `config.json` in the data folder
   default it's the org most of your folders point to.
 - `jiraSite` is where ticket links go; by default it's the site the Atlassian CLI is signed in to.
 
-Text sizes are set in **Settings → Text size**.
+Text sizes are set in **Settings → Text size**, and the theme in **Settings → Appearance**: System
+follows macOS, or pick Light or Dark.
 
 ## Privacy
 

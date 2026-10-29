@@ -1,12 +1,13 @@
-// Settings: integrations, AI triage, the naming rule and text sizes.
+// Settings: integrations, AI triage, the naming rule, the theme and text sizes.
 import SwiftUI
 import AppKit
 
-// Settings: which outside tools are set up, the optional session-naming rule, and text sizes
+// Settings: which outside tools are set up, the optional session-naming rule, the theme, and text sizes
 // (one row per kind of text, each with − / + and a sample drawn at the chosen size).
 struct SettingsView: View {
     @ObservedObject var store: Store
     @ObservedObject private var sizes = TextSizes.shared
+    @ObservedObject private var theme = ThemeSetting.shared
     @State private var ruleInstalled = NamingRule.installed
     @State private var showRule = false
 
@@ -28,6 +29,13 @@ struct SettingsView: View {
 
                 heading("Session naming")
                 namingCard
+
+                heading("Appearance")
+                Picker("", selection: $theme.theme) {
+                    ForEach(Theme.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .settingsCard()
 
                 heading("Text size")
                 Card(items: TextRole.allCases) { role in row(role) }
