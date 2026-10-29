@@ -12,8 +12,8 @@ Tasks are grouped by what they need from you:
 
 | Section | What's in it |
 |---|---|
-| **Active** | Worked on in the last 36 hours, or pinned. Tasks waiting on you, with an orange dot, lead it: blocked on you, or the last turn asked you something you haven't answered |
 | **To-do** | Things you added yourself with **+**; they stay until you mark them done |
+| **Active** | Worked on in the last 36 hours, or pinned. Tasks waiting on you, with an orange dot, lead it: blocked on you, or the last turn asked you something you haven't answered |
 | **Idle lately** | Still open, but untouched for a while: finished or parked? |
 | **Parked** | Set aside by you for later: long-running work, or something put off for now; it never drifts into Idle, and Triage skips it |
 | **Scheduled** | The latest run of each scheduled task |

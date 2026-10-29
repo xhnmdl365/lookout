@@ -30,11 +30,12 @@ struct ContentView: View {
 
     private var specs: [SectionSpec] {
         [
+            // The user's own to-dos come first: nothing else reminds them of those.
+            SectionSpec(title: "To-do", short: "To-do", tint: Palette.todo, items: store.todoTasks),
             // Tasks waiting on the user lead Active rather than having a section of their own, so a
             // task moving between waiting and working stays put instead of jumping between sections.
             SectionSpec(title: "Active", short: "Active", tint: Palette.active, items: store.needsYou + store.active,
                         lead: store.needsYou.count),
-            SectionSpec(title: "To-do", short: "To-do", tint: Palette.todo, items: store.todoTasks),
             SectionSpec(title: "Idle lately", short: "Idle", tint: Palette.idle, items: store.idle,
                         collapsible: true, startOpen: true,
                         trailing: ("Mark all done", { store.markAllDone(store.idle) })),
