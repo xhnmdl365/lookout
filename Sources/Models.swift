@@ -11,6 +11,7 @@ struct PR: Hashable {
     let url: String
     let number: Int
     let state: String
+    var notOwn = false  // the Claude app marks a PR the session read that isn't the user's
 }
 
 // A PR as gh reported it.

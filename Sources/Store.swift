@@ -117,7 +117,8 @@ final class Store: ObservableObject {
                 let summary = d["postTurnSummary"] as? [String: Any]
                 let prs = (d["prs"] as? [[String: Any]] ?? []).compactMap { p -> PR? in
                     guard let u = p["url"] as? String else { return nil }
-                    return PR(url: u, number: p["prNumber"] as? Int ?? 0, state: p["state"] as? String ?? "")
+                    return PR(url: u, number: p["prNumber"] as? Int ?? 0, state: p["state"] as? String ?? "",
+                              notOwn: p["notOwnRead"] as? Bool ?? false)
                 }
                 let runCwd = native(d["cwd"] as? String ?? "")
                 var session = Session(

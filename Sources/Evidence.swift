@@ -203,14 +203,15 @@ extension Store {
     }
 
     // The teammates' PRs a code review is about: those it names or looked at whose author isn't
-    // the user, else, before gh has said who wrote them, the ones it checked out or reviewed.
+    // the user, else, before gh has said who wrote them, the ones the Claude app marks as not
+    // the user's and the ones it checked out or reviewed.
     func reviewedTeamPRs(_ s: Session) -> [String] {
         let refs = textRefs[s.id] ?? []
         if let me {
             let theirs = refs.filter { prLive[$0]?.author.map { $0 != me } ?? false }
             if !theirs.isEmpty { return theirs }
         }
-        return reviewedPRs(s, repos: repoByCwd)
+        return s.prs.filter(\.notOwn).map(\.url) + reviewedPRs(s, repos: repoByCwd)
     }
 
     private func reviewText(_ s: Session) -> String { [s.title, s.detail ?? "", s.needs ?? ""].joined(separator: "\n") }
@@ -236,8 +237,9 @@ extension Store {
 
     // Which PRs each open task touches, and which tasks are team code reviews. A review is
     // told by what the session did, not what it's called: the user's own say first; then a
-    // "Team code review" title. A session that pushed a branch or opened a PR is the user's own
-    // work, as is one titled with a ticket and no word of a review. Otherwise it's a review when
+    // "Team code review" title; then a PR the Claude app marks as read but not the user's, unless
+    // the session pushed. A session that pushed a branch or opened a PR is the user's own work,
+    // as is one titled with a ticket and no word of a review. Otherwise it's a review when
     // it checked out or reviewed a teammate's PR with gh; or diffed, viewed or names a teammate's PR
     // that GitHub lists the user as a reviewer on; or, last, talks of a review next to a teammate's
     // PR, named or looked at.
@@ -252,6 +254,9 @@ extension Store {
                 continue
             }
             if namedTeamReview(s.title) { team.insert(s.id); continue }
+            // The Claude app's own word that the session read a PR that isn't the user's. It names
+            // such a session after that PR, ticket and all, so this comes before the title test.
+            if !s.pushed, s.prs.contains(where: \.notOwn) { team.insert(s.id); continue }
             let titledOwn = ticketKey(s.title) != nil && s.title.range(of: "review", options: .caseInsensitive) == nil
             guard let me, !s.pushed, !titledOwn else { continue }
             let theirs = { (url: String) in self.prLive[url]?.author.map { $0 != me } ?? false }
