@@ -9,9 +9,10 @@ func transcriptURL(cwd: String, cliId: String) -> URL {
     return projectsRoot.appendingPathComponent(folder).appendingPathComponent("\(cliId).jsonl")
 }
 
-// What the end of a desktop session's transcript says. `ask`: the question its last turn left
-// open, when its closing wrap-up asked something (or said it is blocked on the user) and no
-// message from the user has come since. `interrupted`: the user stopped the last turn, which
+// What the end of a desktop session's transcript says. `ask`: the question waiting on the user:
+// one Claude put mid-turn with AskUserQuestion and that has no answer yet, or one its last turn
+// closed on, when the wrap-up asked something (or said it is blocked on the user) and no message
+// from the user has come since. `interrupted`: the user stopped the last turn, which
 // the session record doesn't show as the turn ending.
 struct TranscriptTail {
     var ask: String?
@@ -25,26 +26,38 @@ func readTail(of url: URL) -> TranscriptTail {
     try? h.seek(toOffset: size > 300_000 ? size - 300_000 : 0)
     let tail = String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
     var pending: String?, interrupted = false
+    var asking: (id: String, question: String)?  // an AskUserQuestion still waiting for its answer
     for line in tail.split(separator: "\n") {
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         let content = (o["message"] as? [String: Any])?["content"]
         if o["type"] as? String == "assistant" {
-            for c in content as? [[String: Any]] ?? [] where (c["name"] as? String)?.hasSuffix("__wrap_up") == true {
+            for c in content as? [[String: Any]] ?? [] {
+                let name = c["name"] as? String ?? ""
                 let input = c["input"] as? [String: Any] ?? [:]
-                let ask = (input["ask"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                pending = ask ?? ((input["blocked"] as? Bool) == true ? input["recap"] as? String : nil)
+                if name.hasSuffix("__wrap_up") {
+                    let ask = (input["ask"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    pending = ask ?? ((input["blocked"] as? Bool) == true ? input["recap"] as? String : nil)
+                } else if name == "AskUserQuestion", let id = c["id"] as? String,
+                          let q = (input["questions"] as? [[String: Any]])?.first?["question"] as? String {
+                    asking = (id, q)
+                }
             }
         } else if o["type"] as? String == "user", (o["isMeta"] as? Bool) != true {
+            // The answer to a question comes back as its tool result.
+            if let id = asking?.id, (content as? [[String: Any]])?.contains(where: { $0["tool_use_id"] as? String == id }) == true {
+                asking = nil
+            }
             // A reply typed by the user answers it; tool results and system notices don't.
             let text = (content as? String)
                 ?? (content as? [[String: Any]])?.first { $0["type"] as? String == "text" }?["text"] as? String
             if let text, !text.hasPrefix("<") {
                 pending = nil
+                asking = nil
                 interrupted = text.hasPrefix("[Request interrupted")
             }
         }
     }
-    return TranscriptTail(ask: pending, interrupted: interrupted)
+    return TranscriptTail(ask: asking?.question ?? pending, interrupted: interrupted)
 }
 
 // PRs a shell command looks at with `gh pr <subcommand> <n or URL>`, with `-R/--repo
