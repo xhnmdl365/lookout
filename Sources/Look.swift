@@ -173,8 +173,9 @@ extension View {
     }
 }
 
-// Where a task runs: the Claude desktop app, or `claude` in a terminal. A quiet badge is just
-// a grey icon, for the source most tasks share; the other is a coloured pill.
+// Where a task runs: the Claude desktop app, or `claude` in a terminal, told apart by icon
+// alone to save room. A quiet badge is grey, for the source most tasks share; the other is in
+// its colour.
 struct SourceBadge: View {
     @ObservedObject private var sizes = TextSizes.shared
     let terminal: Bool
@@ -182,7 +183,6 @@ struct SourceBadge: View {
     var todo = false  // the user's own to-do: always its own pill, so it never reads as a Claude task
 
     var body: some View {
-        let color = terminal ? Palette.terminal : Palette.claude
         if todo {
             HStack(spacing: 3) {
                 Image(systemName: "checklist").font(.system(size: sizes.pt(.meta, -2), weight: .semibold))
@@ -193,27 +193,16 @@ struct SourceBadge: View {
             .background(Capsule().fill(Palette.todo.opacity(0.16)))
             .fixedSize()
             .help("A to-do you added")
-        } else if quiet {
-            Image(systemName: terminal ? "terminal" : "macwindow")
-                .font(.system(size: sizes.pt(.meta, -0.5)))
-                .foregroundStyle(.tertiary)
-                .help(terminal ? "Terminal" : "Claude app")
         } else {
-            pill(color)
+            let icon = Image(systemName: terminal ? "terminal" : "macwindow")
+                .font(.system(size: sizes.pt(.meta, -0.5), weight: quiet ? .regular : .semibold))
+                .help(terminal ? "Terminal" : "Claude app")
+            if quiet {
+                icon.foregroundStyle(.tertiary)
+            } else {
+                icon.foregroundStyle(terminal ? Palette.terminal : Palette.claude)
+            }
         }
-    }
-
-    private func pill(_ color: Color) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: terminal ? "terminal" : "macwindow")
-                .font(.system(size: sizes.pt(.meta, -2), weight: .semibold))
-            Text(terminal ? "Terminal" : "App")
-                .font(.system(size: sizes.pt(.meta, -1), weight: .semibold))
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, 5).padding(.vertical, 1.5)
-        .background(Capsule().fill(color.opacity(0.14)))
-        .fixedSize()
     }
 }
 
