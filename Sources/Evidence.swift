@@ -221,7 +221,8 @@ extension Store {
         s.runCwd != s.cwd ? urls : urls.filter { u in !s.prs.contains { $0.url == u } }
     }
 
-    // PRs the session checked out or reviewed with gh, as URLs; with `diffs`, also those it diffed.
+    // PRs the session checked out or reviewed with gh, as URLs; with `diffs`, also those it only
+    // diffed or viewed.
     func reviewedPRs(_ s: Session, repos: [String: String?], diffs: Bool = false) -> [String] {
         (s.reviewRefs + (diffs ? s.diffRefs : [])).compactMap { resolveReviewRef($0, repo: repos[s.cwd] ?? nil) }
     }
@@ -237,8 +238,9 @@ extension Store {
     // told by what the session did, not what it's called: the user's own say first; then a
     // "Team code review" title. A session that pushed a branch or opened a PR is the user's own
     // work, as is one titled with a ticket and no word of a review. Otherwise it's a review when
-    // it checked out or reviewed a teammate's PR with gh; or diffed or names a teammate's PR that
-    // GitHub lists the user as a reviewer on; or, last, talks of a review next to a teammate's PR.
+    // it checked out or reviewed a teammate's PR with gh; or diffed, viewed or names a teammate's PR
+    // that GitHub lists the user as a reviewer on; or, last, talks of a review next to a teammate's
+    // PR, named or looked at.
     func updateReviews(_ all: [Session]) {
         var refs: [String: [String]] = [:], team = Set<String>()
         let overrides = manual.kindOverrides ?? [:]

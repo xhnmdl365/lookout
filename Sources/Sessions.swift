@@ -88,6 +88,11 @@ func prCommandRefs(_ command: String, _ subcommands: Set<String>) -> [String] {
     return refs
 }
 
+// PRs a shell command reads through the GitHub API: `gh api repos/<owner>/<repo>/pulls/<n>…`.
+func prAPIRefs(_ command: String) -> [String] {
+    captures(#"\bgh\s+api\s+['"]?/?repos/([\w.-]+/[\w.-]+)/pulls/(\d+)"#, in: command).map { $0[1] + "#" + $0[2] }
+}
+
 // Branches a shell command works on: `git checkout|switch [-b|-c] <branch>` and the branch in
 // `git push <remote> <branch>`. Sessions sharing a folder share its current branch, so only a
 // branch a session moved to or pushed is its own.
@@ -131,13 +136,13 @@ struct TranscriptFacts {
     var branch: String?            // the folder's branch, as last recorded
     var branches: [String] = []    // branches the session itself checked out or pushed, oldest first
     var reviewRefs: [String] = []  // PRs it checked out or reviewed with gh
-    var diffRefs: [String] = []    // PRs it only diffed: a reviewer does, but so does the author
+    var diffRefs: [String] = []    // PRs it only diffed or viewed: a reviewer does, but so does the author
     var pushed = false             // it pushed a branch or opened a PR: its own work
 
     mutating func add(_ commands: [String]) {
         for c in commands {
             for r in prCommandRefs(c, ["checkout", "review"]) where !reviewRefs.contains(r) { reviewRefs.append(r) }
-            for r in prCommandRefs(c, ["diff"]) where !diffRefs.contains(r) { diffRefs.append(r) }
+            for r in prCommandRefs(c, ["diff", "view"]) + prAPIRefs(c) where !diffRefs.contains(r) { diffRefs.append(r) }
             for b in branchCommandRefs(c) {
                 branches.removeAll { $0 == b }
                 branches.append(b)

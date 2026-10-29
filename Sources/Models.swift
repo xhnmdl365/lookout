@@ -55,7 +55,7 @@ struct Session: Identifiable, Equatable {
     var gitBranch: String? = nil   // the folder's branch its transcript last recorded, terminal or desktop
     var workBranches: [String] = []  // branches the session itself checked out or pushed, oldest first
     var reviewRefs: [String] = []  // PRs it checked out or reviewed with gh: "#12" or "owner/repo#12"
-    var diffRefs: [String] = []    // PRs it only diffed with gh
+    var diffRefs: [String] = []    // PRs it only diffed or viewed with gh
     var pushed = false             // it pushed a branch or opened a PR
     var turnOpen = false           // a turn has started and not ended: Claude is on it
     var lastWrite: Date? = nil     // when its transcript last changed

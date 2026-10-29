@@ -74,8 +74,8 @@ None of this depends on how you name sessions; it looks at what each session did
   sessions share a folder, its current branch belongs to none of them in particular, so only a
   branch a session switched to or pushed is its own.
 - **A team code review** is a session that ran `gh pr checkout` or `gh pr review` on a
-  teammate's PR; or diffed or mentions a teammate's PR that GitHub lists you as a reviewer on;
-  or talks of a review next to a teammate's PR. A session that pushed a branch or opened a PR is
+  teammate's PR; or diffed, viewed or mentions a teammate's PR that GitHub lists you as a
+  reviewer on; or talks of a review next to a teammate's PR it mentions or looked at. A session that pushed a branch or opened a PR is
   your own work, and so is one titled with a ticket key that doesn't mention a review.
 
 When it gets one wrong, right-click the task: set whether it's a code review or your own work,
