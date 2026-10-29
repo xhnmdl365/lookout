@@ -89,7 +89,8 @@ final class Store: ObservableObject {
         loadQueue.async {
             var out: [Session] = self.loadTerminalSessions()
             var deletedAt: [String: Double] = [:]  // uuid -> ms
-            let files = FileManager.default.enumerator(at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey])
+            let files = FileManager.default.enumerator(at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey],
+                                                       options: [.skipsHiddenFiles])  // saves in progress use hidden temp files
             while let url = files?.nextObject() as? URL {
                 let name = url.lastPathComponent
                 if name.hasPrefix("deleted_") {
@@ -106,7 +107,12 @@ final class Store: ObservableObject {
                     continue
                 }
                 guard let data = try? Data(contentsOf: url),
-                      let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+                      let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                    // Caught mid-write: keep what it held last time. Dropping it would make it
+                    // look deleted, and get it marked done.
+                    if let cached = self.sessionCache[url.path] { out.append(autoreleasepool { self.withPendingAsk(cached.session) }) }
+                    continue
+                }
                 let summary = d["postTurnSummary"] as? [String: Any]
                 let prs = (d["prs"] as? [[String: Any]] ?? []).compactMap { p -> PR? in
                     guard let u = p["url"] as? String else { return nil }
@@ -134,6 +140,10 @@ final class Store: ObservableObject {
                 out.append(autoreleasepool { self.withPendingAsk(session) })
             }
             out.sort { $0.lastActivity > $1.lastActivity }
+            // One row per session: a save caught halfway can leave a second copy of its file for a
+            // moment, which would show the task twice. The newest copy stays.
+            var seen = Set<String>()
+            out = out.filter { seen.insert($0.id).inserted }
             // Keep only the newest unarchived run of each scheduled task.
             var seenTasks = Set<String>()
             out = out.filter { s in
