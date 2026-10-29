@@ -23,7 +23,9 @@ The strip at the top counts each section, with an orange badge on Active for the
 on you; click a number to jump there. A session started from another one is shown nested under
 it, and a child waiting on you brings its whole family up with the tasks waiting on you.
 
-Each row shows the session's status, the next step it needs from you, where it runs (Claude app
+While Claude is working on a task, its dot pulses and the row reads **Working** where the time
+would be; a turn that has shown no activity for 15 minutes stops counting, in case the app quit
+mid-turn. Each row shows the session's status, the next step it needs from you, where it runs (Claude app
 or Terminal), the project, branch and ticket status, when it last moved and how long it has run.
 The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
 Hover a row to pin it to the top of its section, park it, or mark it done. Click it to open the session: desktop

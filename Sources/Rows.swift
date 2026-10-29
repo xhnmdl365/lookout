@@ -41,6 +41,7 @@ struct RowShell<Lines: View, Actions: View>: View {
     var links: [RowLink] = []    // shown after `meta`, each its own click
     var metaTail: String? = nil  // after the links: when it last moved
     var duration: String? = nil  // how long the session has run, shown with a timer icon
+    var working = false          // Claude is on it now: the dot pulses, and the time reads "Working"
     let clickable: Bool
     let help: String
     let onOpen: () -> Void
@@ -60,7 +61,7 @@ struct RowShell<Lines: View, Actions: View>: View {
                     Elbow().stroke(Color.secondary.opacity(0.45), lineWidth: 1)
                         .frame(width: 9, height: 9).padding(.leading, 3)
                 }
-                Circle().fill(tint).frame(width: 7, height: 7).padding(.top, 5)
+                StatusDot(color: tint, pulsing: working).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         ((titlePrefix.map { Text($0 + " · ").foregroundColor(Palette.review) } ?? Text(""))
@@ -89,8 +90,13 @@ struct RowShell<Lines: View, Actions: View>: View {
                             .buttonStyle(.plain).foregroundStyle(Color(nsColor: .linkColor).opacity(dimmed ? 0.6 : 0.9))
                             .lineLimit(1).layoutPriority(1).help(link.help)
                     }
-                    if let metaTail {
-                        Text((meta.isEmpty && links.isEmpty ? "" : " · ") + metaTail).foregroundStyle(.tertiary).lineLimit(1)
+                    let lead = meta.isEmpty && links.isEmpty ? "" : " · "
+                    if working {
+                        (Text(lead).foregroundColor(Color(nsColor: .tertiaryLabelColor)) + Text("Working").foregroundColor(tint))
+                            .lineLimit(1).fixedSize()
+                            .help("Claude is working on it now")
+                    } else if let metaTail {
+                        Text(lead + metaTail).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
                 .font(.system(size: sizes.pt(.meta)))
@@ -118,6 +124,28 @@ struct RowShell<Lines: View, Actions: View>: View {
         .onHover { hovering = $0 }
         .onTapGesture { if clickable { onOpen() } }
         .help(help)
+    }
+}
+
+// A row's status dot. While Claude works on the task a ring keeps spreading out from it.
+struct StatusDot: View {
+    let color: Color
+    var pulsing = false
+    @State private var spread = false
+
+    var body: some View {
+        Circle().fill(color).frame(width: 7, height: 7)
+            .overlay {
+                if pulsing {
+                    Circle().stroke(color, lineWidth: 1.5)
+                        .scaleEffect(spread ? 2.4 : 1).opacity(spread ? 0 : 0.7)
+                        .onAppear {
+                            spread = false
+                            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { spread = true }
+                        }
+                        .onDisappear { spread = false }
+                }
+            }
     }
 }
 
@@ -184,6 +212,7 @@ struct Row: View {
             pinned: store.isPinned(s) && !done, terminal: s.isTerminal, todo: s.isTodo,
             quietBadge: store.badgeIsQuiet(terminal: s.isTerminal), meta: meta, links: links, metaTail: metaTail,
             duration: s.isTodo ? nil : s.startedAt.map { span(s.lastActivity.timeIntervalSince($0)) },
+            working: s.working && !done,
             clickable: !s.deleted && !editing,
             help: s.isTodo ? "Edit this to-do" : openHelp(deleted: s.deleted, terminal: s.isTerminal),
             onOpen: { if s.isTodo { withAnimation(Motion.change) { editing = true } } else { store.open(s.id) } }

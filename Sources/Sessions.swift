@@ -217,6 +217,7 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
     var title: String?, first: String?, firstCommand: String?, lastPrompt: String?, cwd: String?, branch: String?
     var facts = TranscriptFacts()
+    var turnOpen = false  // a prompt typed since the last turn ended
     func tag(_ name: String, _ s: String) -> String? {
         guard let a = s.range(of: "<\(name)>"), let b = s.range(of: "</\(name)>"), a.upperBound <= b.lowerBound else { return nil }
         return String(s[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,7 +230,16 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         switch o["type"] as? String {
         case "custom-title": title = o["customTitle"] as? String ?? title
         case "last-prompt": lastPrompt = o["lastPrompt"] as? String ?? lastPrompt
+        case "system" where o["subtype"] as? String == "turn_duration": turnOpen = false  // written as each turn ends
         case "user":
+            // Typed text opens a turn, unless it's the note an interrupt leaves; tool results,
+            // notices and command wrappers don't.
+            if (o["isMeta"] as? Bool) != true {
+                let content = (o["message"] as? [String: Any])?["content"]
+                let text = (content as? String)
+                    ?? (content as? [[String: Any]])?.first { $0["type"] as? String == "text" }?["text"] as? String
+                if let text, !text.hasPrefix("<") { turnOpen = !text.hasPrefix("[Request interrupted") }
+            }
             // The first thing the user typed; skip command wrappers and tool results.
             guard (o["isMeta"] as? Bool) != true,
                   let c = (o["message"] as? [String: Any])?["content"] as? String else { break }
@@ -251,7 +261,7 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         detail: (lastPrompt ?? first).map { "Last prompt: " + clip($0) },
         needs: nil, scheduledTaskId: nil, prs: [], archived: false, deleted: false,
         branch: branch, startedAt: created, gitBranch: branch, workBranches: facts.branches,
-        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed)
+        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed, turnOpen: turnOpen)
 }
 
 // How long a session has run, start to last activity: "45m", "3h 20m", "2d 4h".

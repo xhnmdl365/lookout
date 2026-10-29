@@ -57,10 +57,18 @@ struct Session: Identifiable, Equatable {
     var reviewRefs: [String] = []  // PRs it checked out or reviewed with gh: "#12" or "owner/repo#12"
     var diffRefs: [String] = []    // PRs it only diffed with gh
     var pushed = false             // it pushed a branch or opened a PR
+    var turnOpen = false           // a turn has started and not ended: Claude is on it
+    var lastWrite: Date? = nil     // when its transcript last changed
 
     // Waiting on the user: the app's own summary says blocked, or the last turn asked something.
     var waiting: Bool { status == "blocked" || pendingAsk != nil }
     var nextStep: String? { needs.flatMap { $0.isEmpty ? nil : $0 } ?? pendingAsk }
+
+    // Claude is working on it right now. A turn left open by a crash or a forced quit would say
+    // so forever, so it also needs something written in the last 15 minutes.
+    var working: Bool {
+        turnOpen && !waiting && Date().timeIntervalSince(max(lastActivity, lastWrite ?? .distantPast)) < 15 * 60
+    }
 
     var age: TimeInterval { Date().timeIntervalSince(lastActivity) }
 

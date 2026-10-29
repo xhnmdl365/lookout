@@ -120,7 +120,7 @@ final class Store: ObservableObject {
                     return PR(url: u, number: p["prNumber"] as? Int ?? 0, state: p["state"] as? String ?? "")
                 }
                 let runCwd = native(d["cwd"] as? String ?? "")
-                let session = Session(
+                var session = Session(
                     id: native(url.deletingPathExtension().lastPathComponent),
                     cliId: (d["cliSessionId"] as? String).map(native),
                     title: d["title"] as? String ?? "(untitled)",
@@ -137,6 +137,10 @@ final class Store: ObservableObject {
                     deleted: false,
                     parentId: ((d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String).map(native),
                     startedAt: (d["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
+                // A turn is open while the user's latest message is newer than the last turn's end.
+                if !session.archived, let asked = d["latestUserFrameAt"] as? Double, let edge = d["lastTurnEdgeAt"] as? Double {
+                    session.turnOpen = asked > edge
+                }
                 self.sessionCache[url.path] = (mtime, session)
                 out.append(autoreleasepool { self.withPendingAsk(session) })
             }
@@ -215,6 +219,7 @@ final class Store: ObservableObject {
         s.reviewRefs = facts.reviewRefs
         s.diffRefs = facts.diffRefs
         s.pushed = facts.pushed
+        s.lastWrite = mtime > 0 ? Date(timeIntervalSince1970: mtime) : nil
         return s
     }
 
