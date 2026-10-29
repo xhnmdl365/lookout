@@ -19,6 +19,7 @@ final class Store: ObservableObject {
         var children: [String: [Session]]
         var terminalShare: Double
         var sections: [String: [Session]] = [:]
+        var search: [String: String] = [:]  // what search matches each task on
     }
     private var lastTick = Date()
     @Published var judge: JudgeFile?
@@ -551,6 +552,14 @@ final class Store: ObservableObject {
     }
 
     func children(of s: Session) -> [Session] { cache.children[s.id] ?? [] }
+
+    // What search matches a task on, worked out once per change like the sections.
+    func searchText(_ s: Session) -> String {
+        if let text = cache.search[s.id] { return text }
+        let text = makeSearchText(s)
+        derived?.search[s.id] = text
+        return text
+    }
 
     // A section's top-level tasks: pinned ones first, then newest first. A task with children sorts by its family's
     // newest activity, so a child's fresh progress lifts the whole family. And when a child is

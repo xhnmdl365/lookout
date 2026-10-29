@@ -30,6 +30,15 @@ Hover a row to pin it to the top of its section, park it, or mark it done. Click
 sessions open in the Claude app; terminal sessions switch to their Terminal tab, or resume in a
 new one if they aren't running.
 
+### Search
+
+The magnifier at the top (or ⌘F) searches every task the panel knows, closed ones too: titles,
+status and next step, folder, branch, ticket and PRs, and your to-dos' notes. Open tasks that
+match stay under their sections; closed ones follow, grouped by the day they closed, newest
+first. Click one to open it. Esc closes the search and brings the list back as you left it.
+It runs on what the panel already holds, so it answers as you type; it doesn't search inside
+transcripts.
+
 ### Your own to-dos
 
 Not everything you track is a Claude session. **+** at the top adds a to-do: a title and an

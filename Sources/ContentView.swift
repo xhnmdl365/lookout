@@ -23,6 +23,10 @@ struct ContentView: View {
     @State private var jumpTo: String?   // a section the count strip asked to scroll to
     @State private var showSettings = false
     @State private var picking = false  // the calendar for jumping to a day is open
+    @State private var searching = false  // the search field stands in for the count strip
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+    private var words: [String] { searching ? searchWords(query) : [] }
 
     private var specs: [SectionSpec] {
         [
@@ -114,13 +118,19 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 14).padding(.bottom, 6)
                         .transition(.opacity)
                 }
-                if viewDay == nil { countStrip }
+                if viewDay == nil { if searching { searchBar } else { countStrip } }
                 Divider()
                 Group {
                     if let day = viewDay {
                         DayView(day: day, store: store)
                     } else {
-                        live
+                        // The list stays underneath while results show, so closing search finds
+                        // it scrolled where it was.
+                        ZStack(alignment: .top) {
+                            live.opacity(words.isEmpty ? 1 : 0).allowsHitTesting(words.isEmpty)
+                                .accessibilityHidden(!words.isEmpty)
+                            if !words.isEmpty { results }
+                        }
                     }
                 }
                 .canvas()
@@ -131,6 +141,7 @@ struct ContentView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onReceive(RenderCheck.shared.$settings) { if forRender { showSettings = $0 } }
         .onReceive(RenderCheck.shared.$day) { if forRender, let d = $0 { viewDay = d } }
+        .onReceive(RenderCheck.shared.$search) { if forRender, let q = $0 { searching = true; query = q } }
         .environment(\.forRender, forRender)
     }
 
@@ -164,10 +175,12 @@ struct ContentView: View {
             IconButton(symbol: "chevron.right", help: "Next day") { viewDay = nextDay }
                 .disabled(viewDay == nil)
             Spacer(minLength: 6)
-            // Wide enough, the to-do button says what it adds; narrow, it keeps just its icon.
+            // Wide enough, the to-do and Triage buttons say what they do; narrower, first the
+            // to-do button and then Triage keep just their icons.
             ViewThatFits(in: .horizontal) {
-                headerControls(compact: false)
-                headerControls(compact: true)
+                headerControls(compact: 0)
+                headerControls(compact: 1)
+                headerControls(compact: 2)
             }
             .layoutPriority(1)  // measured before the spacer takes what's left
         }
@@ -176,7 +189,7 @@ struct ContentView: View {
 
     // The header's right side, one height throughout: the page's own actions as pills (Triage the
     // only filled one), then settings as a disc at the end.
-    private func headerControls(compact: Bool) -> some View {
+    private func headerControls(compact: Int) -> some View {
         HStack(spacing: 6) {
             if showSettings {
                 PillButton(title: "Done", color: Palette.claude) { showSettings = false }
@@ -185,13 +198,18 @@ struct ContentView: View {
                     PillButton(title: "Today", symbol: "arrow.uturn.backward", color: Palette.active) { viewDay = nil }
                         .help("Back to today")
                 } else {
-                    PillButton(title: compact ? nil : "To-do", symbol: "plus", color: Palette.todo) {
+                    PillButton(title: compact > 0 ? nil : "To-do", symbol: "plus", color: Palette.todo) {
                         withAnimation(Motion.change) { store.addingTodo = true }
                         reveal("To-do")
                     }
                     .help("Add a to-do of your own")
+                    PillButton(title: nil, symbol: "magnifyingglass", color: searching ? Palette.active : .secondary) {
+                        searching ? closeSearch() : openSearch()
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .help("Search all tasks, closed ones too (⌘F)")
                     if store.triageEnabled {
-                        TriageButton(running: store.judging) { store.runJudge() }
+                        TriageButton(running: store.judging, compact: compact > 1) { store.runJudge() }
                             .hoverHint(judgeHelp)
                             .contextMenu {
                                 Button("Triage All Again") { store.runJudge(all: true) }
@@ -205,6 +223,71 @@ struct ContentView: View {
                     .help("Settings: AI triage, integrations, text size")
             }
         }
+    }
+
+    private func openSearch() {
+        withAnimation(Motion.change) { searching = true }
+        DispatchQueue.main.async { searchFocused = true }
+    }
+
+    private func closeSearch() {
+        withAnimation(Motion.change) { searching = false }
+        query = ""
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            TextField("Title, ticket, branch, PR, folder", text: $query)
+                .textFieldStyle(.plain).font(.system(size: sizes.pt(.title, -1)))
+                .focused($searchFocused)
+                .onExitCommand { closeSearch() }  // Esc
+            if !query.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", help: "Clear") { query = ""; searchFocused = true }
+            }
+        }
+        .padding(.leading, 10).padding(.trailing, 4).frame(height: 30)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        .padding(.horizontal, 10).padding(.bottom, 8)
+        .transition(.opacity)
+    }
+
+    // What a search found: open tasks under their own sections, then closed ones by the day
+    // they closed, newest first.
+    private var results: some View {
+        let open = specs.map { spec in (spec, spec.items.filter { store.familyMatches($0, words) }) }
+            .filter { !$0.1.isEmpty }
+        let earlier = store.earlierMatches(words, limit: 50)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(open, id: \.0.title) { spec, items in
+                    SectionHeader(title: spec.title, count: items.count, tint: spec.tint,
+                                  collapsible: false, open: true, toggle: {})
+                    Card(items: entries(items)) { e in Row(s: e.session, store: store, nested: e.nested) }
+                }
+                ForEach(earlier.groups, id: \.day) { group in
+                    SectionHeader(title: dayTitle(group.day), count: group.tasks.count, tint: Palette.done,
+                                  collapsible: false, open: true, toggle: {})
+                    Card(items: group.tasks.map { Entry(session: $0, nested: false) }) { e in
+                        Row(s: e.session, store: store)
+                    }
+                }
+                if earlier.more > 0 {
+                    Text("\(earlier.more) older match\(earlier.more == 1 ? "" : "es"): add a word to narrow it down")
+                        .font(.system(size: sizes.pt(.meta))).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity).padding(.top, 12)
+                }
+                if open.isEmpty && earlier.groups.isEmpty {
+                    Text("No tasks match")
+                        .font(.system(size: 12)).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 30)
+                }
+            }
+            .padding(.bottom, 8)
+            .overlayScrollers()
+        }
+        .canvas()  // covers the list underneath
     }
 
     private var live: some View {

@@ -224,10 +224,11 @@ struct PillButton: View {
 // The Triage button: the header's one filled pill, in Claude's coral.
 struct TriageButton: View {
     let running: Bool
+    var compact = false  // the icon alone, for a narrow panel
     let action: () -> Void
 
     var body: some View {
-        PillButton(title: running ? "Triaging…" : "Triage", symbol: "sparkles", color: Palette.claude,
+        PillButton(title: compact ? nil : running ? "Triaging…" : "Triage", symbol: "sparkles", color: Palette.claude,
                    filled: true, busy: running, action: action)
             .disabled(running)
     }
@@ -320,4 +321,5 @@ final class RenderCheck: ObservableObject {
     @Published var jump: String?  // a section title, as if its count were clicked
     @Published var settings = false  // shows the settings page while rendering
     @Published var day: String?      // shows that past day while rendering
+    @Published var search: String?   // searches for this while rendering
 }
