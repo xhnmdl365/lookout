@@ -176,6 +176,10 @@ extension Store {
             - All the reviews together on one line: "👀 Reviewed: " and the PRs (or the task names when \
             no PR is given), comma-separated. Say nothing about how the reviews went.
             - Last, one line: "Next: " and what to do first, in a few words.
+            - Leave out trivial items, which the user doesn't need to recall: a quick question \
+            answered (what is this project, how many of something) with nothing built, fixed, sent \
+            or decided; and housekeeping of the user's own tools and settings (Claude rules, memory, \
+            config) that is no ticket's work. Keep anything with a ticket or PR. When in doubt, keep it.
             Use only what the data says; do not invent anything. Example lines:
             ✅ PROJ-12 Export dialog: found the progress bar stalled on large files; fixed it, merged, and confirmed on staging.
             ⛔ PROJ-34 Login retry: PR ready with tests passing, waiting on the team lead's approval.
