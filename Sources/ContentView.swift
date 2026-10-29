@@ -11,6 +11,7 @@ struct SectionSpec {
     var collapsible = false
     var startOpen = false
     var trailing: (label: String, action: () -> Void)? = nil
+    var lead = 0  // the first this many items wait on the user: a badge in the strip counts them
 }
 
 struct ContentView: View {
@@ -25,9 +26,11 @@ struct ContentView: View {
 
     private var specs: [SectionSpec] {
         [
-            SectionSpec(title: "Attention", short: "Attention", tint: Palette.needsYou, items: store.needsYou),
+            // Tasks waiting on the user lead Active rather than having a section of their own, so a
+            // task moving between waiting and working stays put instead of jumping between sections.
+            SectionSpec(title: "Active", short: "Active", tint: Palette.active, items: store.needsYou + store.active,
+                        lead: store.needsYou.count),
             SectionSpec(title: "To-do", short: "To-do", tint: Palette.todo, items: store.todoTasks),
-            SectionSpec(title: "Active", short: "Active", tint: Palette.active, items: store.active),
             SectionSpec(title: "Idle lately", short: "Idle", tint: Palette.idle, items: store.idle,
                         collapsible: true, startOpen: true,
                         trailing: ("Mark all done", { store.markAllDone(store.idle) })),
@@ -57,10 +60,20 @@ struct ContentView: View {
             ForEach(specs.filter { !$0.items.isEmpty }, id: \.title) { spec in
                 Button { reveal(spec.title) } label: {
                     VStack(spacing: 1) {
-                        Text("\(spec.items.count)")
-                            .font(.system(size: sizes.pt(.count), weight: .bold)).monospacedDigit()
-                            .contentTransition(.numericText())  // digits roll when a count changes
-                            .foregroundStyle(spec.items.isEmpty ? Color.secondary.opacity(0.45) : spec.tint)
+                        HStack(alignment: .top, spacing: 2) {
+                            Text("\(spec.items.count)")
+                                .font(.system(size: sizes.pt(.count), weight: .bold)).monospacedDigit()
+                                .contentTransition(.numericText())  // digits roll when a count changes
+                                .foregroundStyle(spec.items.isEmpty ? Color.secondary.opacity(0.45) : spec.tint)
+                            if spec.lead > 0 {  // how many of them wait on you
+                                Text("\(spec.lead)")
+                                    .font(.system(size: sizes.pt(.count, -6), weight: .bold)).monospacedDigit()
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4).padding(.vertical, 0.5)
+                                    .background(Capsule().fill(Palette.needsYou))
+                                    .fixedSize()
+                            }
+                        }
                         Text(spec.short)
                             .font(.system(size: sizes.pt(.count, -7), weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
                             .minimumScaleFactor(0.65)  // a narrow panel shrinks the labels rather than running them together
@@ -70,6 +83,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(spec.items.isEmpty)
+                .help(spec.lead > 0 ? "\(spec.lead) waiting on you" : "")
             }
         }
         .padding(.horizontal, 6).padding(.bottom, 6)
@@ -260,9 +274,14 @@ struct ContentView: View {
             usage += ", about \(recent.map { $0.tokensIn + $0.tokensOut }.reduce(0, +) / recent.count / 1000)k tokens each"
         }
         let last = store.judge.map { "Last run " + relative(Date(timeIntervalSince1970: $0.generatedAt)) + ". " } ?? ""
-        return "Gives each task in Attention and Active a one-line verdict. "
+        return "Gives each task in Active a one-line verdict. "
             + "Only tasks that changed since their last verdict are sent; unchanged ones are rechecked daily.\n"
             + "\(usage).\n\(last)Right-click to triage all again, or for the steps."
+    }
+
+    // Each task followed by the sessions started from it.
+    private func entries(_ tasks: [Session]) -> [Entry] {
+        tasks.flatMap { s in [Entry(session: s, nested: false)] + store.children(of: s).map { Entry(session: $0, nested: true) } }
     }
 
     @ViewBuilder private func section(_ spec: SectionSpec) -> some View {
@@ -282,10 +301,9 @@ struct ContentView: View {
                         .transition(.opacity)
                 }
                 if open && !spec.items.isEmpty {
-                    let entries = spec.items.flatMap { s in
-                        [Entry(session: s, nested: false)] + store.children(of: s).map { Entry(session: $0, nested: true) }
-                    }
-                    Card(items: entries) { e in
+                    // One card even in Active, where waiting tasks lead: a task that starts or stops
+                    // waiting on you moves within it rather than leaving one card for another.
+                    Card(items: entries(spec.items)) { e in
                         Row(s: e.session, store: store, nested: e.nested)
                     }
                     .transition(.opacity)  // a section's card fades in when its first task arrives

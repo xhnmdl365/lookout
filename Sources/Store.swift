@@ -554,7 +554,7 @@ final class Store: ObservableObject {
 
     // A section's top-level tasks: pinned ones first, then newest first. A task with children sorts by its family's
     // newest activity, so a child's fresh progress lifts the whole family. And when a child is
-    // waiting on the user, its whole family moves up to "Attention" (from Active or Idle;
+    // waiting on the user, its whole family moves up to the waiting tasks that lead Active (from Active or Idle;
     // a family the user parked stays there).
     private func top(_ section: String) -> [Session] {
         if let done = cache.sections[section] { return done }
@@ -589,7 +589,7 @@ final class Store: ObservableObject {
         sessions.filter { $0.scheduledTaskId != nil && !isDone($0) && within($0, days: scheduledDays) }
     }
 
-    // What Triage looks at: "Attention" and "Active", with their open children. Idle,
+    // What Triage looks at: Active, waiting tasks included, with their open children. Idle,
     // on-hold and scheduled tasks are skipped.
     var judged: [Session] {
         let listed = needsYou + active
