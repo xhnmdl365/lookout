@@ -110,6 +110,9 @@ extension Store {
             Dictionary(sessions.map { s in
                 (s.id, Array(Set(s.prs.map(\.url) + (textRefs[s.id] ?? []))).map { ($0, prLive[$0]) })
             }, uniquingKeysWith: { a, _ in a })
+        // When each session began, for how long its task had been open by that day.
+        let startedAt = Dictionary(sessions.compactMap { s in s.startedAt.map { (s.id, $0.timeIntervalSince1970) } },
+                                   uniquingKeysWith: { a, _ in a })
         let gh = Tools.gh
         summarizing = day
         let started = Date().timeIntervalSince1970
@@ -122,11 +125,13 @@ extension Store {
                 if t.todo == true { r["kind"] = "to-do" } else if let review = t.review { r["kind"] = review ? "review" : "own work" }
                 if let ticket = t.ticket { r["ticket"] = ticket }
                 if let prs = t.reviewPRs, !prs.isEmpty { r["prs"] = prs }
+                if let began = startedAt[t.id] { r["daysOpen"] = max(Int((end - began) / 86400), 0) }
                 var said = [t.title, t.detail ?? "", t.needs ?? ""]
                 if let url = transcripts[t.id] {
                     let trail = dayTrail(url, from: Date(timeIntervalSince1970: start), to: Date(timeIntervalSince1970: end))
                     if !trail.recaps.isEmpty { r["turns"] = trail.recaps }
                     else if !trail.prompts.isEmpty { r["asked"] = trail.prompts }
+                    if trail.minutes > 0 { r["minutes"] = trail.minutes }
                     said += trail.recaps + trail.prompts
                 }
                 // Its own PRs: the candidates it mentioned that day, as they stood at the day's end.
@@ -144,6 +149,7 @@ extension Store {
                 if t.todo != true, !worked, snap.isDone(t) || t.deleted { return nil }
                 return r
             }
+            let total = rows.compactMap { $0["minutes"] as? Int }.reduce(0, +)
             let data = try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
             try? data?.write(to: summaryInputURL)  // a copy, for checking what the summary was given
             let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
@@ -162,9 +168,16 @@ extension Store {
             first (the first two and the last ten when there were more); a terminal session has none, \
             and `asked` holds what the user typed instead. `detail` and `needs` are its latest status. \
             `closedBy` says how a finished task was closed; it decides the ✅, it is not the work.
+            `minutes` is how long the task was worked on that day, gaps over 10 minutes left out; \
+            \(span(Double(total) * 60)) in all. Tasks ran side by side, so these overlap and add up to \
+            more than the hours in the day. `daysOpen` is how many days the task had been open by then.
 
             Write the user a summary of that day for their own reference, in English, one line per item, \
             no heading, no bullets:
+            - First, one line: "Overall: " and two or three plain sentences, at most 60 words: where \
+            the time went (the tasks with the most `minutes`, as rough times like "about 2h"), what \
+            was finished, and any task open for many days that is still not done. Leave out trivial \
+            items here too.
             - Each of the user's own tasks, in the order given: an emoji, the ticket key when there is \
             one, a short name in English (translate a title in another language), a colon, then one or \
             two plain sentences, at most 35 words, on what was \

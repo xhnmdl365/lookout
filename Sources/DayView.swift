@@ -71,8 +71,8 @@ struct SummaryText: View {
                         Text(String(mark))
                         inline(line.dropFirst().trimmingCharacters(in: .whitespaces))
                     }
-                } else if line.hasPrefix("Next:") {
-                    inline("**Next:**" + line.dropFirst("Next:".count))
+                } else if let lead = ["Next:", "Overall:"].first(where: line.hasPrefix) {
+                    inline("**\(lead)**" + line.dropFirst(lead.count))
                 } else {
                     inline(line.hasPrefix("#") ? "**" + line.drop { $0 == "#" || $0 == " " } + "**" : line)
                 }
