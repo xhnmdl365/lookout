@@ -182,7 +182,7 @@ struct Entry: Identifiable {
 
 func openHelp(deleted: Bool, terminal: Bool) -> String {
     if deleted { return "This session was deleted" }
-    return terminal ? "Switch to its Terminal tab, or resume it in a new one" : "Open in the Claude app"
+    return terminal ? "Switch to its Terminal tab, or resume it in one open in its folder" : "Open in the Claude app"
 }
 
 struct Row: View {

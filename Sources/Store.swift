@@ -257,7 +257,8 @@ final class Store: ObservableObject {
     // MARK: Opening a task
 
     // Desktop sessions open in the app; terminal ones switch to their Terminal tab when one
-    // is running, else resume in a new tab. Never starts a second copy of a running session.
+    // is running, else resume in an idle tab in their folder, or a new tab. Never starts a second
+    // copy of a running session.
     func open(_ id: String) {
         guard !id.hasPrefix("todo_") else { return }  // a to-do has no session to open
         guard !id.hasPrefix("cli_") else {
@@ -275,7 +276,13 @@ final class Store: ObservableObject {
                             a.runModal()
                         }
                     } else {
-                        resumeInTerminal(cwd: s.runCwd, uuid: uuid)
+                        // A tab already open in the session's folder and idle at its prompt is
+                        // reused, so each resume doesn't leave another tab behind.
+                        let idle = idleTerminalTTYs()
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            let tty = ttyInFolder(idle, cwd: s.runCwd)
+                            DispatchQueue.main.async { resumeInTerminal(cwd: s.runCwd, uuid: uuid, tty: tty) }
+                        }
                     }
                 }
             }

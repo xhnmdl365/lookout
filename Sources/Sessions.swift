@@ -342,10 +342,73 @@ func focusTerminalTab(_ tty: String) -> Bool {
     return r?.booleanValue ?? false
 }
 
-func resumeInTerminal(cwd: String, uuid: String) {
+// The ttys of Terminal.app tabs sitting at a shell prompt, front window first. Empty when
+// Terminal isn't running, so asking never launches it.
+func idleTerminalTTYs() -> [String] {
+    guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").isEmpty else { return [] }
+    let script = """
+    set out to ""
+    tell application "Terminal"
+        repeat with w in windows
+            repeat with t in tabs of w
+                if not busy of t then set out to out & (tty of t) & linefeed
+            end repeat
+        end repeat
+    end tell
+    return out
+    """
+    var err: NSDictionary?
+    let r = NSAppleScript(source: script)?.executeAndReturnError(&err)
+    if let err { log("listing tabs failed: \(err)") }
+    return (r?.stringValue ?? "").split(separator: "\n").map(String.init)
+}
+
+// Of those ttys, the first whose shell is in this folder.
+func ttyInFolder(_ ttys: [String], cwd: String) -> String? {
+    guard !ttys.isEmpty else { return nil }
+    let shells: Set = ["zsh", "bash", "sh", "fish", "tcsh", "ksh"]
+    // The shell in the foreground of each tty: the process waiting at the prompt.
+    var shellOn: [String: String] = [:]  // pid -> tty
+    for line in shell("/bin/ps", ["-axo", "pid=,tty=,stat=,comm="]).split(separator: "\n") {
+        let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+        guard parts.count == 4, parts[2].contains("+") else { continue }
+        let tty = "/dev/" + parts[1]
+        // ps pads the columns, and a login shell's name starts with "-".
+        let name = (parts[3].trimmingCharacters(in: CharacterSet.whitespaces.union(["-"])) as NSString).lastPathComponent
+        if ttys.contains(tty), shells.contains(name) { shellOn[String(parts[0])] = tty }
+    }
+    guard !shellOn.isEmpty else { return nil }
+    // lsof prints "p<pid>" then "n<folder>" for each.
+    var folderOf: [String: String] = [:]  // tty -> folder
+    var pid = ""
+    for line in shell("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fn", "-p", shellOn.keys.joined(separator: ",")])
+        .split(separator: "\n") {
+        if line.hasPrefix("p") { pid = String(line.dropFirst()) }
+        if line.hasPrefix("n"), let tty = shellOn[pid] { folderOf[tty] = String(line.dropFirst()) }
+    }
+    let want = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
+    return ttys.first { folderOf[$0].map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == want }
+}
+
+// Resumes the session in the Terminal tab on this tty, else in a new tab.
+func resumeInTerminal(cwd: String, uuid: String, tty: String? = nil) {
     let cmd = "cd \(shellQuote(cwd)) && claude --resume \(uuid)"
+    let reuse = tty.map { tty in """
+        repeat with w in windows
+            repeat with t in tabs of w
+                if tty of t is \(appleScriptString(tty)) and not busy of t then
+                    do script \(appleScriptString(cmd)) in t
+                    set selected of t to true
+                    set index of w to 1
+                    activate
+                    return
+                end if
+            end repeat
+        end repeat
+    """ } ?? ""
     let script = """
     tell application "Terminal"
+    \(reuse)
         do script \(appleScriptString(cmd))
         activate
     end tell
