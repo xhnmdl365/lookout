@@ -141,6 +141,10 @@ final class Store: ObservableObject {
                 // A turn is open while the user's latest message is newer than the last turn's end.
                 if !session.archived, let asked = d["latestUserFrameAt"] as? Double, let edge = d["lastTurnEdgeAt"] as? Double {
                     session.turnOpen = asked > edge
+                    // What made it look open, to check a task wrongly shown as Working.
+                    if session.turnOpen, self.sessionCache[url.path]?.session.turnOpen != true {
+                        log("turn open: \(session.id) asked \(Int(asked)) edge \(Int(edge)) status \(summary?["status_category"] as? String ?? "none")")
+                    }
                 }
                 self.sessionCache[url.path] = (mtime, session)
                 out.append(autoreleasepool { self.withPendingAsk(session) })
