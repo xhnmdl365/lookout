@@ -17,7 +17,7 @@ final class Store: ObservableObject {
     private struct Derived {
         var open: [Session]
         var children: [String: [Session]]
-        var terminalShare: Double
+        var shares: [Source: Double]  // each source's part of the open sessions
         var sections: [String: [Session]] = [:]
         var search: [String: String] = [:]  // what search matches each task on
     }
@@ -92,7 +92,8 @@ final class Store: ObservableObject {
             var deletedAt: [String: Double] = [:]  // uuid -> ms
             let files = FileManager.default.enumerator(at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey],
                                                        options: [.skipsHiddenFiles])  // saves in progress use hidden temp files
-            while let url = files?.nextObject() as? URL {
+            // Cowork tasks' records sit in a folder of their own, and read the same way.
+            for url in (files?.allObjects.compactMap { $0 as? URL } ?? []) + coworkRecords() {
                 let name = url.lastPathComponent
                 if name.hasPrefix("deleted_") {
                     let ms = (try? String(contentsOf: url, encoding: .utf8)).flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
@@ -121,12 +122,17 @@ final class Store: ObservableObject {
                               notOwn: p["notOwnRead"] as? Bool ?? false)
                 }
                 let runCwd = native(d["cwd"] as? String ?? "")
+                let cowork = url.path.hasPrefix(coworkRoot.path)
+                let localId = url.deletingPathExtension().lastPathComponent
+                let cliId = (d["cliSessionId"] as? String).map(native)
                 var session = Session(
-                    id: native(url.deletingPathExtension().lastPathComponent),
-                    cliId: (d["cliSessionId"] as? String).map(native),
+                    id: native(cowork ? "cowork_" + localId.dropFirst("local_".count) : localId),
+                    cliId: cliId,
                     title: d["title"] as? String ?? "(untitled)",
-                    // originCwd is the repo a worktree session was started from.
-                    cwd: (d["originCwd"] as? String).map(native) ?? runCwd,
+                    // originCwd is the repo a worktree session was started from; a Cowork task
+                    // runs in a folder of its own, but works on the first folder the user chose.
+                    cwd: (d["originCwd"] as? String).map(native)
+                        ?? (cowork ? (d["userSelectedFolders"] as? [String])?.first.map(native) : nil) ?? runCwd,
                     runCwd: runCwd,
                     lastActivity: Date(timeIntervalSince1970: ((d["lastActivityAt"] as? Double) ?? 0) / 1000),
                     status: summary?["status_category"] as? String,
@@ -138,6 +144,7 @@ final class Store: ObservableObject {
                     deleted: false,
                     parentId: ((d["spawnedFrom"] as? [String: Any])?["sessionId"] as? String).map(native),
                     startedAt: (d["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
+                if cowork { session.coworkTranscript = cliId.flatMap { coworkTranscriptURL(record: url, cliId: $0) } }
                 // A turn is open while the user's latest message is newer than the last turn's end.
                 if !session.archived, let asked = d["latestUserFrameAt"] as? Double, let edge = d["lastTurnEdgeAt"] as? Double {
                     session.turnOpen = asked > edge
@@ -200,12 +207,12 @@ final class Store: ObservableObject {
     }
 
     // Adds the question a desktop session's last turn left open, whether the user stopped that
-    // turn, and its branch and reviewed PRs,
+    // turn, and its branch and reviewed PRs (for a Cowork task, also whether a turn is open and
+    // its last prompt),
     // read again only when its transcript changes. Archived and scheduled sessions are skipped:
     // nobody's waiting there.
     private func withPendingAsk(_ s: Session) -> Session {
-        guard !s.archived, s.scheduledTaskId == nil, let cli = s.cliId else { return s }
-        let url = transcriptURL(cwd: s.runCwd, cliId: cli)
+        guard !s.archived, s.scheduledTaskId == nil, let url = s.transcript else { return s }
         let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate?.timeIntervalSince1970 ?? 0
         let tail: TranscriptTail, facts: TranscriptFacts
@@ -220,6 +227,10 @@ final class Store: ObservableObject {
         }
         var s = s
         s.pendingAsk = tail.ask
+        if s.source == .cowork {
+            s.turnOpen = tail.open
+            s.detail = tail.lastPrompt.map { "Last prompt: " + clip($0) }
+        }
         if tail.interrupted { s.turnOpen = false }  // stopped: the record still shows the turn open
         s.gitBranch = facts.branch
         s.workBranches = facts.branches
@@ -261,7 +272,7 @@ final class Store: ObservableObject {
 
     // MARK: Opening a task
 
-    // Desktop sessions open in the app; terminal ones switch to their Terminal tab when one
+    // Desktop sessions open in the app, Cowork tasks in its Cowork view; terminal ones switch to their Terminal tab when one
     // is running, else resume in an idle tab in their folder, or a new tab. Never starts a second
     // copy of a running session.
     func open(_ id: String) {
@@ -291,6 +302,10 @@ final class Store: ObservableObject {
                     }
                 }
             }
+            return
+        }
+        if id.hasPrefix("cowork_") {
+            NSWorkspace.shared.open(URL(string: "claude://claude.ai/cowork/local_\(id.dropFirst("cowork_".count))")!)
             return
         }
         NSWorkspace.shared.open(URL(string: "claude://code/continue?session=\(id)")!)
@@ -545,8 +560,8 @@ final class Store: ObservableObject {
         let open = sessions.filter { $0.scheduledTaskId == nil && !$0.archived && !$0.deleted && !isDone($0) }
         let d = Derived(open: open,
                         children: Dictionary(grouping: open.filter { $0.parentId != nil }, by: { $0.parentId! }),
-                        terminalShare: { let sessions = open.filter { !$0.isTodo }
-                            return sessions.isEmpty ? 0 : Double(sessions.filter(\.isTerminal).count) / Double(sessions.count) }())
+                        shares: { let sessions = open.filter { !$0.isTodo }
+                            return Dictionary(grouping: sessions, by: \.source).mapValues { Double($0.count) / Double(sessions.count) } }())
         derived = d
         return d
     }
@@ -630,15 +645,11 @@ final class Store: ObservableObject {
             .sorted { (mark($0)?.at ?? 0) > (mark($1)?.at ?? 0) }
     }
 
-    // Whether a source's badge stays quiet (a grey icon) rather than a coloured pill. The source
-    // most open tasks come from goes quiet, so the rarer one stands out; when neither is rare
-    // (the smaller side is a third or more), both keep their pills.
-    func badgeIsQuiet(terminal: Bool) -> Bool {
-        guard !openTasks.isEmpty else { return false }
-        let terminalShare = cache.terminalShare
-        if terminalShare < 1.0 / 3 { return !terminal }
-        if terminalShare > 2.0 / 3 { return terminal }
-        return false
+    // Whether a source's badge stays quiet (a grey icon) rather than in its colour. The source
+    // most open tasks come from goes quiet, so the rarer ones stand out; when none has more than
+    // two thirds of them, all keep their colours.
+    func badgeIsQuiet(_ source: Source) -> Bool {
+        (cache.shares[source] ?? 0) > 2.0 / 3
     }
 
     // The colour a task's dot takes, matching its section header.

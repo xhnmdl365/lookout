@@ -14,6 +14,13 @@ struct PR: Hashable {
     var notOwn = false  // the Claude app marks a PR the session read that isn't the user's
 }
 
+// Where a task runs, read from its id: "cli_" for `claude` in a terminal, "cowork_" for a
+// Cowork task in the Claude app; Code sessions in the app keep the app's own "local_".
+enum Source {
+    case app, terminal, cowork
+    init(id: String) { self = id.hasPrefix("cli_") ? .terminal : id.hasPrefix("cowork_") ? .cowork : .app }
+}
+
 // A PR as gh reported it.
 struct PRInfo {
     var state: String
@@ -43,7 +50,7 @@ struct Session: Identifiable, Equatable {
     let runCwd: String  // where it actually ran
     let lastActivity: Date
     let status: String?
-    let detail: String?
+    var detail: String?
     let needs: String?
     let scheduledTaskId: String?
     let prs: [PR]
@@ -60,6 +67,12 @@ struct Session: Identifiable, Equatable {
     var pushed = false             // it pushed a branch or opened a PR
     var turnOpen = false           // a turn has started and not ended: Claude is on it
     var lastWrite: Date? = nil     // when its transcript last changed
+    var coworkTranscript: URL? = nil  // a Cowork task keeps its transcript in its own folder
+
+    // Its transcript, if it has one on this Mac.
+    var transcript: URL? {
+        source == .cowork ? coworkTranscript : cliId.map { transcriptURL(cwd: runCwd, cliId: $0) }
+    }
 
     // Waiting on the user: the app's own summary says blocked, or the last turn asked something.
     var waiting: Bool { status == "blocked" || pendingAsk != nil }
@@ -72,6 +85,8 @@ struct Session: Identifiable, Equatable {
     }
 
     var age: TimeInterval { Date().timeIntervalSince(lastActivity) }
+
+    var source: Source { Source(id: id) }
 
     // A `claude` run in a terminal rather than the desktop app; its id is "cli_<session uuid>".
     var isTerminal: Bool { id.hasPrefix("cli_") }
@@ -92,7 +107,7 @@ func native(_ s: String) -> String {
 }
 
 func projectName(_ cwd: String) -> String {
-    cwd.contains("/scratch-workspaces/") ? "No folder" : (cwd as NSString).lastPathComponent
+    cwd.contains("/scratch-workspaces/") || cwd.contains("/local-agent-mode-sessions/") ? "No folder" : (cwd as NSString).lastPathComponent
 }
 
 struct Mark: Codable, Equatable {

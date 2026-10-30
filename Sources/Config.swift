@@ -5,6 +5,7 @@ import AppKit
 let home = FileManager.default.homeDirectoryForCurrentUser
 let sessionsRoot = home.appendingPathComponent("Library/Application Support/Claude/claude-code-sessions")
 let projectsRoot = home.appendingPathComponent(".claude/projects")  // CLI transcripts, terminal sessions among them
+let coworkRoot = home.appendingPathComponent("Library/Application Support/Claude/local-agent-mode-sessions")
 let appSupport = home.appendingPathComponent("Library/Application Support")
 let dataDir = appSupport.appendingPathComponent("ClaudeTasks")
 let legacyDataDir = appSupport.appendingPathComponent("TaskFloat")  // the prototype's folder, moved over once

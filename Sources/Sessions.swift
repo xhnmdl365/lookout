@@ -13,10 +13,14 @@ func transcriptURL(cwd: String, cliId: String) -> URL {
 // one Claude put mid-turn with AskUserQuestion and that has no answer yet, or one its last turn
 // closed on, when the wrap-up asked something (or said it is blocked on the user) and no message
 // from the user has come since. `interrupted`: the user stopped the last turn, which
-// the session record doesn't show as the turn ending.
+// the session record doesn't show as the turn ending. `open` and `lastPrompt` are for Cowork
+// tasks, whose record keeps neither when a turn starts and ends nor a status summary: a prompt
+// typed since Claude last ended a turn, and the last thing the user typed.
 struct TranscriptTail {
     var ask: String?
     var interrupted = false
+    var open = false
+    var lastPrompt: String?
 }
 
 func readTail(of url: URL) -> TranscriptTail {
@@ -25,12 +29,13 @@ func readTail(of url: URL) -> TranscriptTail {
     let size = (try? h.seekToEnd()) ?? 0
     try? h.seek(toOffset: size > 300_000 ? size - 300_000 : 0)
     let tail = String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
-    var pending: String?, interrupted = false
+    var pending: String?, interrupted = false, open = false, lastPrompt: String?
     var asking: (id: String, question: String)?  // an AskUserQuestion still waiting for its answer
     for line in tail.split(separator: "\n") {
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         let content = (o["message"] as? [String: Any])?["content"]
         if o["type"] as? String == "assistant" {
+            if (o["message"] as? [String: Any])?["stop_reason"] as? String == "end_turn" { open = false }
             for c in content as? [[String: Any]] ?? [] {
                 let name = c["name"] as? String ?? ""
                 let input = c["input"] as? [String: Any] ?? [:]
@@ -54,10 +59,37 @@ func readTail(of url: URL) -> TranscriptTail {
                 pending = nil
                 asking = nil
                 interrupted = text.hasPrefix("[Request interrupted")
+                open = !interrupted
+                if !interrupted { lastPrompt = text }
             }
         }
     }
-    return TranscriptTail(ask: asking?.question ?? pending, interrupted: interrupted)
+    return TranscriptTail(ask: asking?.question ?? pending, interrupted: interrupted, open: open, lastPrompt: lastPrompt)
+}
+
+// Cowork keeps each task's record two folders down, by account and organisation, beside a
+// folder of the task's own files.
+func coworkRecords() -> [URL] {
+    func list(_ dir: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+    }
+    return list(coworkRoot).flatMap(list).flatMap(list)
+        .filter { $0.lastPathComponent.hasPrefix("local_") && $0.pathExtension == "json" }
+}
+
+// A Cowork task's transcript, in its own folder's .claude/projects. Its project folder's name
+// is cut short and hashed when the path is long, so it's found by the file's name instead.
+func coworkTranscriptURL(record: URL, cliId: String) -> URL? {
+    let projects = record.deletingPathExtension().appendingPathComponent(".claude/projects")
+    let fm = FileManager.default
+    return ((try? fm.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil)) ?? [])
+        .map { $0.appendingPathComponent("\(cliId).jsonl") }
+        .first { fm.fileExists(atPath: $0.path) }
+}
+
+// A prompt cut to fit on a row.
+func clip(_ s: String) -> String {
+    s.count > 60 ? String(s.prefix(60)) + "…" : s
 }
 
 // PRs a shell command looks at with `gh pr <subcommand> <n or URL>`, with `-R/--repo
@@ -291,7 +323,6 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         }
     }
     guard let cwd = cwd.map(native) else { return nil }
-    let clip = { (s: String) in s.count > 60 ? String(s.prefix(60)) + "…" : s }
     let uuid = native(url.deletingPathExtension().lastPathComponent)
     return Session(
         id: "cli_" + uuid, cliId: uuid,

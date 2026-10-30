@@ -34,7 +34,7 @@ struct RowShell<Lines: View, Actions: View>: View {
     let titleDone: Bool
     let dimmed: Bool
     let pinned: Bool
-    let terminal: Bool
+    let source: Source
     var todo = false
     var quietBadge = false
     let meta: String
@@ -80,7 +80,7 @@ struct RowShell<Lines: View, Actions: View>: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 6) {
-                SourceBadge(terminal: terminal, quiet: quietBadge, todo: todo)
+                SourceBadge(source: source, quiet: quietBadge, todo: todo)
                 HStack(spacing: 0) {
                     // The project keeps its room first; the time at the end gives way.
                     Text(meta).foregroundStyle(.tertiary).lineLimit(1).layoutPriority(2)
@@ -180,9 +180,13 @@ struct Entry: Identifiable {
     var id: String { session.id }
 }
 
-func openHelp(deleted: Bool, terminal: Bool) -> String {
+func openHelp(deleted: Bool, source: Source) -> String {
     if deleted { return "This session was deleted" }
-    return terminal ? "Switch to its Terminal tab, or resume it in one open in its folder" : "Open in the Claude app"
+    switch source {
+    case .terminal: return "Switch to its Terminal tab, or resume it in one open in its folder"
+    case .cowork: return "Open in Cowork in the Claude app"
+    case .app: return "Open in the Claude app"
+    }
 }
 
 struct Row: View {
@@ -209,12 +213,12 @@ struct Row: View {
             nested: nested, tint: store.tint(s), title: teamReview ? reviewTitle(s.title) : s.title,
             titlePrefix: teamReview ? "Team code review" : nil,
             titleDone: done, dimmed: done || s.deleted,
-            pinned: store.isPinned(s) && !done, terminal: s.isTerminal, todo: s.isTodo,
-            quietBadge: store.badgeIsQuiet(terminal: s.isTerminal), meta: meta, links: links, metaTail: metaTail,
+            pinned: store.isPinned(s) && !done, source: s.source, todo: s.isTodo,
+            quietBadge: store.badgeIsQuiet(s.source), meta: meta, links: links, metaTail: metaTail,
             duration: s.isTodo ? nil : s.startedAt.map { span(s.lastActivity.timeIntervalSince($0)) },
             working: s.working && !done,
             clickable: !s.deleted && !editing,
-            help: s.isTodo ? "Edit this to-do" : openHelp(deleted: s.deleted, terminal: s.isTerminal),
+            help: s.isTodo ? "Edit this to-do" : openHelp(deleted: s.deleted, source: s.source),
             onOpen: { if s.isTodo { withAnimation(Motion.change) { editing = true } } else { store.open(s.id) } }
         ) {
             if editing, let t = store.todos.first(where: { $0.id == s.id }) {

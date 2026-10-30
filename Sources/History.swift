@@ -102,7 +102,7 @@ extension Store {
             .sorted { (snap.isDone($0) ? 1 : 0, $0.lastActivity) > (snap.isDone($1) ? 1 : 0, $1.lastActivity) }
         guard !moved.isEmpty, let claude = Tools.claude else { return }
         // Each task's transcript, for what it did that day; read off the main thread below.
-        let transcripts = Dictionary(sessions.compactMap { s in s.cliId.map { (s.id, transcriptURL(cwd: s.runCwd, cliId: $0)) } },
+        let transcripts = Dictionary(sessions.compactMap { s in s.transcript.map { (s.id, $0) } },
                                      uniquingKeysWith: { a, _ in a })
         // Each task's PRs, with what gh last said of them if it has been asked. The Claude app links
         // a folder's PR to every session there, so these are only candidates.

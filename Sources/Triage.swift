@@ -132,7 +132,8 @@ extension Store {
         }
         return [
             "id": s.id, "title": s.title, "project": s.project,
-            "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)" : "desktop",
+            "source": s.isTerminal ? "terminal (no status summary; detail is the user's last prompt)"
+                : s.source == .cowork ? "cowork (no status summary; detail is the user's last prompt)" : "desktop",
             "kind": teamReviews.contains(s.id) ? "team code review" : "own work",
             "ticket": ticketLine,
             "status": s.pendingAsk != nil ? "blocked" : s.status ?? "", "detail": s.detail ?? "", "needs": s.nextStep ?? "",

@@ -4,7 +4,8 @@ A small floating panel for macOS that turns your Claude Code sessions into a tas
 can see at a glance what you're working on, what's waiting on you, and what's done, and jump
 straight back into any session.
 
-It reads sessions from the **Claude desktop app** (Code tab) and from **`claude` in a terminal**.
+It reads sessions from the **Claude desktop app** (Code and Cowork) and from **`claude` in a terminal**.
+Chat conversations aren't kept on your Mac, so they aren't tracked.
 
 ## What it shows
 
@@ -25,11 +26,11 @@ it, and a child waiting on you brings its whole family up with the tasks waiting
 
 While Claude is working on a task, its dot pulses and the row reads **Working** where the time
 would be; a turn that has shown no activity for 15 minutes stops counting, in case the app quit
-mid-turn. Each row shows the session's status, the next step it needs from you, where it runs (Claude app
-or Terminal), the project, branch and ticket status, when it last moved and how long it has run.
+mid-turn. Each row shows the session's status, the next step it needs from you, where it runs (Claude app,
+Cowork or Terminal, by icon), the project, branch and ticket status, when it last moved and how long it has run.
 The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
 Hover a row to pin it to the top of its section, park it, or mark it done. Click it to open the session: desktop
-sessions open in the Claude app; terminal sessions switch to their Terminal tab. One that isn't
+sessions open in the Claude app, Cowork tasks in its Cowork view; terminal sessions switch to their Terminal tab. One that isn't
 running resumes in a Terminal tab already open in its folder and sitting at the prompt, or in a
 new tab if there's none.
 
@@ -184,8 +185,8 @@ follows macOS, or pick Light or Dark.
 ## Privacy
 
 - The panel reads local files only: the Claude desktop app's session records
-  (`~/Library/Application Support/Claude/claude-code-sessions`) and Claude Code transcripts
-  (`~/.claude/projects`). It doesn't modify either.
+  (`~/Library/Application Support/Claude/claude-code-sessions`, and `local-agent-mode-sessions`
+  for Cowork) and Claude Code transcripts (`~/.claude/projects`). It doesn't modify any of them.
 - It writes only to its own data folder, plus `~/.claude/CLAUDE.md` if you add the naming rule.
 - It makes no network calls of its own; `claude`, `gh` and `acli` do, as you, when it runs them.
 
@@ -193,6 +194,8 @@ follows macOS, or pick Light or Dark.
 
 - The Claude desktop app's session records aren't a documented format and may change with app
   updates; fields the panel can't read are left blank.
+- Cowork records carry no status summary, so a Cowork task shows its last prompt, and whether
+  Claude is working on it comes from its transcript.
 - Switching to a running terminal session works with Terminal.app; macOS asks once for
   permission to control it.
 

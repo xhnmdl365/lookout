@@ -24,6 +24,7 @@ enum Palette {
     static let done = Color.green
     static let claude = Color(red: 0.85, green: 0.47, blue: 0.34)  // the App badge
     static let terminal = Color(red: 0.35, green: 0.55, blue: 0.40) // the Terminal badge
+    static let cowork = Color(red: 0.33, green: 0.47, blue: 0.72)   // the Cowork badge
     static let suggestion = Color.purple
     static let review = Color.pink  // the "Team code review" title prefix
     static let todo = Color(red: 0.12, green: 0.64, blue: 0.54)  // to-dos the user added by hand; deep enough to read as text
@@ -173,12 +174,12 @@ extension View {
     }
 }
 
-// Where a task runs: the Claude desktop app, or `claude` in a terminal, told apart by icon
-// alone to save room. A quiet badge is grey, for the source most tasks share; the other is in
-// its colour.
+// Where a task runs: Code in the Claude desktop app, Cowork there, or `claude` in a terminal,
+// told apart by icon alone to save room. A quiet badge is grey, for the source most tasks share;
+// the others are in their colours.
 struct SourceBadge: View {
     @ObservedObject private var sizes = TextSizes.shared
-    let terminal: Bool
+    let source: Source
     var quiet = false
     var todo = false  // the user's own to-do: always its own pill, so it never reads as a Claude task
 
@@ -194,13 +195,18 @@ struct SourceBadge: View {
             .fixedSize()
             .help("A to-do you added")
         } else {
-            let icon = Image(systemName: terminal ? "terminal" : "macwindow")
+            let (symbol, help, color): (String, String, Color) = switch source {
+            case .terminal: ("terminal", "Terminal", Palette.terminal)
+            case .cowork: ("briefcase", "Cowork in the Claude app", Palette.cowork)
+            case .app: ("macwindow", "Claude app", Palette.claude)
+            }
+            let icon = Image(systemName: symbol)
                 .font(.system(size: sizes.pt(.meta, -0.5), weight: quiet ? .regular : .semibold))
-                .help(terminal ? "Terminal" : "Claude app")
+                .help(help)
             if quiet {
                 icon.foregroundStyle(.tertiary)
             } else {
-                icon.foregroundStyle(terminal ? Palette.terminal : Palette.claude)
+                icon.foregroundStyle(color)
             }
         }
     }
