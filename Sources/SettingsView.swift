@@ -1,8 +1,9 @@
-// Settings: integrations, AI triage, the naming rule, the theme and text sizes.
+// Settings: integrations, AI triage, the naming rule, how long tasks stay active, the theme and text sizes.
 import SwiftUI
 import AppKit
 
-// Settings: which outside tools are set up, the optional session-naming rule, the theme, and text sizes
+// Settings: which outside tools are set up, the optional session-naming rule, how long a task
+// stays in Active, the theme, and text sizes
 // (one row per kind of text, each with − / + and a sample drawn at the chosen size).
 struct SettingsView: View {
     @ObservedObject var store: Store
@@ -29,6 +30,9 @@ struct SettingsView: View {
 
                 heading("Session naming")
                 namingCard
+
+                heading("Active tasks")
+                activeCard
 
                 heading("Appearance")
                 Picker("", selection: $theme.theme) {
@@ -89,6 +93,27 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch).controlSize(.small).tint(Palette.claude)
             Text("Triage asks Claude for a one-line verdict on each task in Active, and closes ones with hard evidence. Each run uses your Claude plan, about 10k tokens for a dozen tasks. Off, its verdicts and suggestions are hidden too.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .settingsCard()
+    }
+
+    // How long a task with no new activity stays in Active before it moves to Idle lately.
+    private var activeCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Keep a task in Active for").font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 4)
+                IconButton(symbol: "minus", help: "Fewer days", tint: Palette.claude) { store.activeDays -= 1 }
+                    .disabled(store.activeDays <= Store.activeDayRange.lowerBound)
+                Text(store.activeDays == 1 ? "1 day" : "\(store.activeDays) days")
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                    .frame(width: 50)
+                IconButton(symbol: "plus", help: "More days", tint: Palette.claude) { store.activeDays += 1 }
+                    .disabled(store.activeDays >= Store.activeDayRange.upperBound)
+            }
+            Text("After this long with no new activity, a task moves to Idle lately. Pinned tasks stay in Active.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

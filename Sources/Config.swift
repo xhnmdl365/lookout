@@ -35,7 +35,6 @@ struct Config: Codable {
     var githubOrg: String?     // the org for "repo#123" mentions when no folder says which
     var jiraSite: String?      // e.g. "yourteam.atlassian.net", for ticket links; else acli's site
     var triageModel: String?   // the model Triage and day summaries run on
-    var activeHours: Double?
     var blockedDays: Double?
     var scheduledDays: Double?
     var prGraceHours: Double?
@@ -177,7 +176,7 @@ let triageModel = config.triageModel ?? "sonnet"
 //   scheduled-task runs            -> only the latest run per task, in its own section
 //   done (manual or auto)          -> "Done today" on the day it was marked, then gone
 //   blocked, <= 14 days            -> top of "Active"
-//   activity within 36h, or pinned -> "Active"
+//   activity within the days set in Settings (7 by default), or pinned -> "Active"
 //   anything else still open       -> "Idle lately", however old (finished or parked?)
 //   parked (manual)                -> "Parked": no age limit, skipped by Claude, back to normal on new activity
 // Auto-done, hard evidence only:
@@ -187,7 +186,6 @@ let triageModel = config.triageModel ?? "sonnet"
 // Layer 3 (Claude, no hard evidence): a suggestion the user accepts or ignores.
 // Each day's view is kept as a snapshot (days/<date>.json), rewritten only while that day lasts;
 // afterwards only the user's own edits change it.
-let activeHours = config.activeHours ?? 36
 let scheduledDays = config.scheduledDays ?? 7    // a scheduled task's latest run shows this long
 let blockedDays = config.blockedDays ?? 14       // blocked longer than this counts as idle, not waiting on you
 let prRefreshMinutes = config.refreshMinutes ?? 10  // how often PRs and tickets are checked

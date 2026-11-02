@@ -39,6 +39,14 @@ final class Store: ObservableObject {
             reload()
         }
     }
+    // How many days a task stays in Active after it last moved, set in Settings.
+    static let activeDayRange = 1...30
+    @Published var activeDays = (UserDefaults.standard.object(forKey: "activeDays") as? Int) ?? 7 {
+        didSet {
+            UserDefaults.standard.set(activeDays, forKey: "activeDays")
+            derived = nil  // the sections are worked out again
+        }
+    }
     var lastSnapshotTasks: Data?
     var summaryTried: [String: Date] = [:]  // day -> last auto attempt, retried after 30 min
     var prLive: [String: PRInfo] = [:]  // PR url -> from gh
@@ -566,7 +574,7 @@ final class Store: ObservableObject {
         return d
     }
     private var openTasks: [Session] { cache.open }
-    private func recent(_ s: Session) -> Bool { s.age <= activeHours * 3600 || isPinned(s) }
+    private func recent(_ s: Session) -> Bool { s.age <= Double(activeDays) * 86400 || isPinned(s) }
     private func within(_ s: Session, days: Double) -> Bool { s.age <= days * 86400 }
 
     // The section a task belongs to on its own, or nil when it is done or scheduled.
