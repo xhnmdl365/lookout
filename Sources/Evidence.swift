@@ -75,17 +75,18 @@ func branchTicketKeys(_ branch: String) -> [String] {
 }
 
 // One PR's state, merge or close time, author, branch, title and reviewers, from gh.
-func prInfo(gh: String, url: String) -> PRInfo? {
-    guard let out = run(gh, ["pr", "view", url, "--json", "state,mergedAt,closedAt,author,headRefName,title,reviewRequests,latestReviews"]),
-          let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
-          let state = o["state"] as? String else { return nil }
+// With no info, `error` is what gh said instead.
+func prInfo(gh: String, url: String) -> (info: PRInfo?, error: String) {
+    let (out, err) = runReporting(gh, ["pr", "view", url, "--json", "state,mergedAt,closedAt,author,headRefName,title,reviewRequests,latestReviews"])
+    guard let o = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any],
+          let state = o["state"] as? String else { return (nil, err) }
     let iso = ISO8601DateFormatter()
     let end = (o["mergedAt"] as? String).flatMap(iso.date) ?? (o["closedAt"] as? String).flatMap(iso.date)
     let loginOf = { (d: Any?) in (d as? [String: Any])?["login"] as? String }
     let requested = (o["reviewRequests"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
     let reviewed = (o["latestReviews"] as? [[String: Any]] ?? []).compactMap { loginOf($0["author"]) }
-    return PRInfo(state: state, endedAt: end?.timeIntervalSince1970, author: loginOf(o["author"]),
-                  branch: o["headRefName"] as? String, title: o["title"] as? String, reviewers: Set(requested + reviewed))
+    return (PRInfo(state: state, endedAt: end?.timeIntervalSince1970, author: loginOf(o["author"]),
+                   branch: o["headRefName"] as? String, title: o["title"] as? String, reviewers: Set(requested + reviewed)), "")
 }
 
 // A PR URL as people write it: "repo#12".
@@ -274,7 +275,9 @@ extension Store {
     // `then` runs on the main queue once the new states are in, before the reload they trigger.
     func refreshPRs(then: (() -> Void)? = nil) {
         // Open tasks' PRs, their own and those named in their text. Open ones may have changed;
-        // finished ones need their merge time once; ones gh can't find are not asked again.
+        // finished ones need their merge time once. A failed read is tried again on the next
+        // refresh, unless GitHub said there's no such PR (a ticket number read as one, a repo the
+        // user can't see): that one waits a day.
         let open = sessions.filter { !$0.archived && !$0.deleted && !isDone($0) && !isOnHold($0) && $0.scheduledTaskId == nil && !$0.isTodo }
         let folders = Set(open.map(\.cwd)).filter { repoByCwd[$0] == nil }
         let live = prLive, knownRepos = repoByCwd, needMe = me == nil
@@ -282,18 +285,35 @@ extension Store {
         let ownWork = open.filter { manual.ticketOverrides?[$0.id] == nil && !teamReviews.contains($0.id) }
         let knownKeys = Set(open.compactMap { manual.ticketOverrides?[$0.id] }.filter { !$0.isEmpty }
                             + ownWork.flatMap(ticketCandidates))
-        let skip = ticketMissing, knownMe = me
+        // Keys Jira says it doesn't have wait a day: most aren't tickets at all.
+        let skip = Set(ticketMissing.filter { Date().timeIntervalSince1970 - $0.value < 86400 }.keys), knownMe = me
+        let wasMissing = ticketMissing
         let gh = Tools.gh, acliPath = Tools.acli  // either may be missing; its checks are then skipped
         DispatchQueue.global(qos: .utility).async {
             var repos = knownRepos
             for f in folders { repos[f] = .some(githubRepo(of: f)) }
             let login = needMe ? gh.map { shell($0, ["api", "user", "-q", ".login"]).trimmingCharacters(in: .whitespacesAndNewlines) } : nil
             let urls = Set(open.flatMap { self.taskPRs($0, repos: repos) })
-                .filter { gh != nil && (live[$0] == nil || live[$0]?.state == "OPEN") }
+                .filter { u in
+                    guard gh != nil else { return false }
+                    guard let pr = live[u] else { return true }
+                    return pr.state == "OPEN" || (pr.state == "UNKNOWN" && Date().timeIntervalSince1970 - (pr.askedAt ?? 0) > 86400)
+                }
             var found: [String: PRInfo] = [:]
+            var unread: [String] = []  // failed for now; asked again next time
             for u in urls {
-                found[u] = gh.flatMap { prInfo(gh: $0, url: u) } ?? PRInfo(state: "UNKNOWN")
+                guard let gh else { continue }
+                let (pr, err) = prInfo(gh: gh, url: u)
+                if let pr {
+                    found[u] = pr
+                } else if LookupFailure(err) == .missing {
+                    found[u] = PRInfo(state: "UNKNOWN", askedAt: Date().timeIntervalSince1970)
+                    if live[u]?.state != "UNKNOWN" { log("gh: no such PR \(u): \(firstLine(err))") }
+                } else {
+                    unread.append(firstLine(err))
+                }
             }
+            if let reason = unread.first { log("gh: couldn't read \(unread.count) PRs, trying again next refresh: \(reason)") }
             // Tickets, read with the Atlassian CLI when it is installed. Their status can move
             // either way, so every one is read again each time; keys Jira doesn't know are dropped.
             var keys = knownKeys
@@ -308,19 +328,30 @@ extension Store {
             keys.subtract(skip)
             var foundTickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]
             var missing = Set<String>()
+            var ticketsUnread: [String] = []
             if let acli = acliPath {
                 for k in keys {
-                    let out = shell(acli, ["jira", "workitem", "view", k, "--json", "--fields", "status,statuscategorychangedate"])
-                    if let t = parseTicket(out) { foundTickets[k] = t } else { missing.insert(k); log("acli: no status for \(k)") }
+                    let (out, err) = runReporting(acli, ["jira", "workitem", "view", k, "--json", "--fields", "status,statuscategorychangedate"])
+                    if let t = parseTicket(out) {
+                        foundTickets[k] = t
+                    } else if LookupFailure(err) == .missing {
+                        missing.insert(k)
+                        if wasMissing[k] == nil { log("acli: no such ticket \(k)") }
+                    } else {
+                        ticketsUnread.append(firstLine(err))
+                    }
                 }
-                log("acli: read \(foundTickets.count) of \(keys.count) tickets: \(foundTickets.keys.sorted().joined(separator: " "))")
+                log("acli: read \(foundTickets.count) of \(keys.count) tickets"
+                    + (foundTickets.isEmpty ? "" : ": " + foundTickets.keys.sorted().joined(separator: " "))
+                    + (ticketsUnread.first.map { "; \(ticketsUnread.count) failed, trying again next refresh: " + $0 } ?? ""))
             }
             DispatchQueue.main.async {
                 self.repoByCwd = repos
                 if let login, !login.isEmpty { self.me = login }
                 self.prLive.merge(found) { _, new in new }
                 self.tickets.merge(foundTickets) { _, new in new }
-                self.ticketMissing.formUnion(missing)
+                for k in missing { self.ticketMissing[k] = Date().timeIntervalSince1970 }
+                for k in foundTickets.keys { self.ticketMissing[k] = nil }
                 self.updateReviews(self.sessions)  // authors and reviewers just came in
                 then?()
                 self.reload()

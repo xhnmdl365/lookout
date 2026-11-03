@@ -29,6 +29,7 @@ struct PRInfo {
     var branch: String? = nil       // its head branch
     var title: String? = nil
     var reviewers = Set<String>()   // logins asked to review it, or who did
+    var askedAt: Double? = nil      // UNKNOWN only: when GitHub said there's no such PR, to ask again a day on
 }
 
 // A to-do the user added by hand: not a Claude session, so nothing tracks it; it's done when

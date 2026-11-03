@@ -55,7 +55,7 @@ final class Store: ObservableObject {
     var textRefs: [String: [String]] = [:]  // task id -> PRs it names, its own and in its text
     var teamReviews = Set<String>()    // tasks reviewing a teammate's PR
     var tickets: [String: (status: String, done: Bool, changedAt: Double?)] = [:]  // Jira key -> from acli
-    var ticketMissing = Set<String>()  // keys acli couldn't read, not asked again
+    var ticketMissing: [String: Double] = [:]  // keys Jira says it doesn't have -> when; asked again daily
     var jiraSite = config.jiraSite     // for ticket links; else found from acli
     private var lastPrRefresh = Date.distantPast
     private var timer: Timer?

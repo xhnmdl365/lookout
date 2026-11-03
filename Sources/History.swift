@@ -141,7 +141,7 @@ extension Store {
                     guard let n = pr.url.split(separator: "/").last else { return false }
                     return text.range(of: #"(#|/pull/)"# + n + #"(?!\d)"#, options: .regularExpression) != nil
                 }.prefix(5).compactMap { pr -> String? in
-                    guard let info = pr.known ?? gh.flatMap({ prInfo(gh: $0, url: pr.url) }), info.state != "UNKNOWN" else { return nil }
+                    guard let info = pr.known ?? gh.flatMap({ prInfo(gh: $0, url: pr.url).info }), info.state != "UNKNOWN" else { return nil }
                     return "\(prLabel(pr.url)) " + ((info.endedAt ?? 0) >= end ? "OPEN" : info.state)
                 }
                 if !states.isEmpty { r["prStates"] = Array(states) }
