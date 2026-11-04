@@ -112,7 +112,8 @@ tools are left out. Past days only change when you edit them.
 ## Requirements
 
 - macOS 13 or later
-- Xcode Command Line Tools, to build (`xcode-select --install`)
+- Xcode Command Line Tools with Swift 5.9 or later (Xcode 15 or later), to build
+  (`xcode-select --install`; `swiftc --version` shows which you have)
 - The Claude desktop app and/or Claude Code in a terminal
 
 Optional, each one adds to what the panel can do:
@@ -137,9 +138,14 @@ acli jira auth login --web
 ## Build and run
 
 ```bash
+git clone https://github.com/xhnmdl365/claude-tasks.git
+cd claude-tasks
 ./build.sh
 open Lookout.app
 ```
+
+To update later: `git pull`, then `./build.sh` again and reopen the app. You can move
+`Lookout.app` to `/Applications` if you like; it keeps its data in its own folder either way.
 
 The panel stays on top of other windows. Closing or minimizing it only hides it; click Lookout
 in the Dock (or its menu bar icon) to bring it back. To rebuild the app icon after changing it:
