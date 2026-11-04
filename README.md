@@ -138,8 +138,8 @@ acli jira auth login --web
 ## Build and run
 
 ```bash
-git clone https://github.com/xhnmdl365/claude-tasks.git
-cd claude-tasks
+git clone https://github.com/xhnmdl365/lookout.git
+cd lookout
 ./build.sh
 open Lookout.app
 ```
