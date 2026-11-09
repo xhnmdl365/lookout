@@ -246,6 +246,7 @@ final class Store: ObservableObject {
         s.diffRefs = facts.diffRefs
         s.pushed = facts.pushed
         s.lastWrite = mtime > 0 ? Date(timeIntervalSince1970: mtime) : nil
+        s.lastWorked = tail.lastWorked
         return s
     }
 
@@ -390,10 +391,11 @@ final class Store: ObservableObject {
 
     func isPinned(_ s: Session) -> Bool { manual.pinned?.contains(s.id) ?? false }
 
-    // Parked until the user unparks it, or works in the session again.
+    // Parked until the user unparks it, or works in the session again: a message from them or
+    // Claude, not the app touching the session record (it does on a restart).
     func isOnHold(_ s: Session) -> Bool {
         guard let at = manual.onHold?[s.id], !isDone(s) else { return false }
-        return s.lastActivity.timeIntervalSince1970 <= at + 60
+        return (s.lastWorked ?? s.lastActivity).timeIntervalSince1970 <= at + 60
     }
 
     func toggleHold(_ s: Session) {

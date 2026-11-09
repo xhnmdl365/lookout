@@ -68,6 +68,7 @@ struct Session: Identifiable, Equatable {
     var pushed = false             // it pushed a branch or opened a PR
     var turnOpen = false           // a turn has started and not ended: Claude is on it
     var lastWrite: Date? = nil     // when its transcript last changed
+    var lastWorked: Date? = nil    // when the user or Claude last wrote in its transcript
     var coworkTranscript: URL? = nil  // a Cowork task keeps its transcript in its own folder
 
     // Its transcript, if it has one on this Mac.

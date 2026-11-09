@@ -15,13 +15,33 @@ func transcriptURL(cwd: String, cliId: String) -> URL {
 // from the user has come since. `interrupted`: the user stopped the last turn, which
 // the session record doesn't show as the turn ending. `open` and `lastPrompt` are for Cowork
 // tasks, whose record keeps neither when a turn starts and ends nor a status summary: a prompt
-// typed since Claude last ended a turn, and the last thing the user typed.
+// typed since Claude last ended a turn, and the last thing the user typed. `lastWorked`: when
+// the user or Claude last wrote in it, which the app's own bookkeeping (on a restart, say) doesn't move.
 struct TranscriptTail {
     var ask: String?
     var interrupted = false
     var open = false
     var lastPrompt: String?
+    var lastWorked: Date?
 }
+
+// The time on a transcript entry the user or Claude wrote: a message, or a tool call or its
+// result within a turn. Entries the app adds on its own (links, notices, summaries) aren't work.
+// Kept as text while scanning, and read as a date once at the end.
+func workStamp(_ o: [String: Any]) -> String? {
+    guard ["user", "assistant"].contains(o["type"] as? String ?? ""), (o["isMeta"] as? Bool) != true else { return nil }
+    return o["timestamp"] as? String
+}
+
+func stampDate(_ stamp: String?) -> Date? {
+    stamp.flatMap { transcriptStamp.date(from: $0) ?? transcriptStampPlain.date(from: $0) }
+}
+private let transcriptStamp: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+private let transcriptStampPlain = ISO8601DateFormatter()
 
 func readTail(of url: URL) -> TranscriptTail {
     guard let h = try? FileHandle(forReadingFrom: url) else { return TranscriptTail() }
@@ -29,11 +49,12 @@ func readTail(of url: URL) -> TranscriptTail {
     let size = (try? h.seekToEnd()) ?? 0
     try? h.seek(toOffset: size > 300_000 ? size - 300_000 : 0)
     let tail = String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
-    var pending: String?, interrupted = false, open = false, lastPrompt: String?
+    var pending: String?, interrupted = false, open = false, lastPrompt: String?, lastWorked: String?
     var asking: (id: String, question: String)?  // an AskUserQuestion still waiting for its answer
     for line in tail.split(separator: "\n") {
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         let content = (o["message"] as? [String: Any])?["content"]
+        if let at = workStamp(o) { lastWorked = at }
         if o["type"] as? String == "assistant" {
             if (o["message"] as? [String: Any])?["stop_reason"] as? String == "end_turn" { open = false }
             for c in content as? [[String: Any]] ?? [] {
@@ -64,7 +85,8 @@ func readTail(of url: URL) -> TranscriptTail {
             }
         }
     }
-    return TranscriptTail(ask: asking?.question ?? pending, interrupted: interrupted, open: open, lastPrompt: lastPrompt)
+    return TranscriptTail(ask: asking?.question ?? pending, interrupted: interrupted, open: open, lastPrompt: lastPrompt,
+                          lastWorked: stampDate(lastWorked))
 }
 
 // Cowork keeps each task's record two folders down, by account and organisation, beside a
@@ -290,6 +312,7 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
     var title: String?, first: String?, firstCommand: String?, lastPrompt: String?, cwd: String?, branch: String?
     var facts = TranscriptFacts()
     var turnOpen = false  // a prompt typed since the last turn ended
+    var lastWorked: String?
     func tag(_ name: String, _ s: String) -> String? {
         guard let a = s.range(of: "<\(name)>"), let b = s.range(of: "</\(name)>"), a.upperBound <= b.lowerBound else { return nil }
         return String(s[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -297,6 +320,7 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
     for line in text.split(separator: "\n") {
         guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
         if cwd == nil { cwd = o["cwd"] as? String }
+        if let at = workStamp(o) { lastWorked = at }
         if let b = o["gitBranch"] as? String, !b.isEmpty { branch = b }
         facts.add(commands(inEntry: o))
         switch o["type"] as? String {
@@ -332,7 +356,8 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
         detail: (lastPrompt ?? first).map { "Last prompt: " + clip($0) },
         needs: nil, scheduledTaskId: nil, prs: [], archived: false, deleted: false,
         branch: branch, startedAt: created, gitBranch: branch, workBranches: facts.branches,
-        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed, turnOpen: turnOpen)
+        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed, turnOpen: turnOpen,
+        lastWorked: stampDate(lastWorked))
 }
 
 // How long a session has run, start to last activity: "45m", "3h 20m", "2d 4h".
