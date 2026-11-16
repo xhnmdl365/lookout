@@ -74,6 +74,12 @@ final class Store: ObservableObject {
     init() {
         try? FileManager.default.createDirectory(at: daysDir, withIntermediateDirectories: true)
         refreshDays()
+        // A first launch starts the list empty: sessions from before the app was installed show up
+        // only once they're worked in again, so there's no backlog to clear.
+        if !FileManager.default.fileExists(atPath: stateURL.path) {
+            manual.since = Date().timeIntervalSince1970
+            save()
+        }
         if let data = try? Data(contentsOf: stateURL),
            var m = try? JSONDecoder().decode(Manual.self, from: data) {
             var marks = m.marks ?? [:]
@@ -321,13 +327,27 @@ final class Store: ObservableObject {
     }
 
     // Layer 1 rules, plus layer 2 verdicts from the last Claude run.
-    private func apply(_ loaded: [Session], deletedAt: [String: Double]) {
-        var all = loaded + todos.map(todoSession)
+    private func apply(_ found: [Session], deletedAt: [String: Double]) {
         var known = manual.known ?? [:]
         var marks = manual.marks ?? [:]
         let dismissed = manual.dismissed ?? []
         let now = Date().timeIntervalSince1970
-        let ids = Set(loaded.map(\.id))
+        let ids = Set(found.map(\.id))
+        // Sessions not worked in since the list's start are left out, and forgotten, so one
+        // deleted later doesn't come back as a deleted task. Pinned and parked ones stay: the user
+        // chose to keep those.
+        var loaded = found
+        if let since = manual.since {
+            let pinned = manual.pinned ?? [], parked = manual.onHold ?? [:]
+            let kept = { (s: Session) in
+                pinned.contains(s.id) || parked[s.id].map { s.lastActivity.timeIntervalSince1970 <= $0 + 60 } == true
+            }
+            let before = { (s: Session) in s.lastActivity.timeIntervalSince1970 < since && !kept(s) }
+            loaded = found.filter { !before($0) }
+            for s in found where before(s) { known[s.id] = nil }
+            for (id, _) in known where !ids.contains(id) && (marks[id]?.at ?? now) < since { known[id] = nil }
+        }
+        var all = loaded + todos.map(todoSession)
 
         for s in loaded where !s.archived && s.scheduledTaskId == nil && !s.isTodo {
             known[s.id] = Known(title: s.title, cwd: s.cwd)
@@ -377,6 +397,24 @@ final class Store: ObservableObject {
         }
         writeTodaySnapshot()
         autoSummarize()
+    }
+
+    // MARK: Where the list starts
+
+    var since: Date? { manual.since.map { Date(timeIntervalSince1970: $0) } }
+
+    // Leaves out every session not worked in from now on, but pinned and parked ones; each comes
+    // back when it's worked in again.
+    func startFresh() {
+        manual.since = Date().timeIntervalSince1970
+        save()
+        reload()
+    }
+
+    func showEarlierSessions() {
+        manual.since = nil
+        save()
+        reload()
     }
 
     // MARK: Marks

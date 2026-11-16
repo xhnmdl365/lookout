@@ -1,4 +1,5 @@
-// Settings: integrations, AI triage, the naming rule, how long tasks stay active, the theme and text sizes.
+// Settings: integrations, AI triage, the naming rule, how long tasks stay active, where the list
+// starts, the theme and text sizes.
 import SwiftUI
 import AppKit
 
@@ -11,6 +12,7 @@ struct SettingsView: View {
     @ObservedObject private var theme = ThemeSetting.shared
     @State private var ruleInstalled = NamingRule.installed
     @State private var showRule = false
+    @State private var confirmFresh = false
 
     var body: some View {
         ScrollView {
@@ -33,6 +35,9 @@ struct SettingsView: View {
 
                 heading("Active tasks")
                 activeCard
+
+                heading("Earlier sessions")
+                earlierCard
 
                 heading("Appearance")
                 Picker("", selection: $theme.theme) {
@@ -118,6 +123,39 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .settingsCard()
+    }
+
+    // Where the list starts. A new install starts empty; Start fresh does the same later on.
+    private var earlierCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let since = store.since {
+                    Text("Sessions not worked in since \(since.formatted(date: .abbreviated, time: .shortened)) are hidden. Each comes back when you work in it again.")
+                } else {
+                    Text("Every session is listed, however old. Start fresh hides the ones not worked in from now on; each comes back when you work in it again.")
+                }
+            }
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            Text("Pinned and parked tasks, and your to-dos, always stay.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Button("Start fresh") { confirmFresh = true }
+                    .foregroundStyle(Palette.claude)
+                Spacer()
+                if store.since != nil {
+                    Button("Show earlier sessions") { store.showEarlierSessions() }
+                }
+            }
+            .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
+        }
+        .settingsCard()
+        .alert("Start fresh?", isPresented: $confirmFresh) {
+            Button("Start fresh") { store.startFresh() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sessions not worked in from now on are hidden, until you work in them again. Show earlier sessions brings them all back.")
+        }
     }
 
     // The rule lives in the user's own ~/.claude/CLAUDE.md, added or removed only from here.

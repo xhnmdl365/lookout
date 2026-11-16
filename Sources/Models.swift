@@ -135,6 +135,7 @@ struct Manual: Codable {
     var onHold: [String: Double]? = [:] // id -> when the user parked it
     var kindOverrides: [String: String]? = [:]   // id -> "review" or "own", the user's correction
     var ticketOverrides: [String: String]? = [:] // id -> the user's ticket key, "" for none
+    var since: Double? = nil  // where the list starts: sessions not worked in since are left out
 }
 
 struct Verdict: Codable {

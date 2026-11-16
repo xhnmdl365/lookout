@@ -7,6 +7,13 @@ straight back into any session.
 It reads sessions from the **Claude desktop app** (Code and Cowork) and from **`claude` in a terminal**.
 Chat conversations aren't kept on your Mac, so they aren't tracked.
 
+## Starting out
+
+A new install starts with an empty list. Sessions from before you installed it show up only once
+you work in them again, so there's no backlog of old sessions to clear first. To see them anyway,
+use **Settings → Earlier sessions → Show earlier sessions**. **Start fresh** in the same place
+clears the list the same way later on; pinned and parked tasks, and your to-dos, stay.
+
 ## What it shows
 
 Tasks are grouped by what they need from you:
