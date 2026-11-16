@@ -49,7 +49,10 @@ struct Session: Identifiable, Equatable {
     let title: String
     let cwd: String     // the repo the session belongs to (a worktree's origin)
     let runCwd: String  // where it actually ran
-    let lastActivity: Date
+    // When the user or Claude last wrote in it, from its transcript; the session record's time
+    // only when there's no transcript to read, since the Claude app moves that one on its own
+    // (on a restart, say).
+    var lastActivity: Date
     let status: String?
     var detail: String?
     let needs: String?
@@ -68,7 +71,6 @@ struct Session: Identifiable, Equatable {
     var pushed = false             // it pushed a branch or opened a PR
     var turnOpen = false           // a turn has started and not ended: Claude is on it
     var lastWrite: Date? = nil     // when its transcript last changed
-    var lastWorked: Date? = nil    // when the user or Claude last wrote in its transcript
     var coworkTranscript: URL? = nil  // a Cowork task keeps its transcript in its own folder
 
     // Its transcript, if it has one on this Mac.

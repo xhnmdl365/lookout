@@ -27,7 +27,8 @@ it, and a child waiting on you brings its whole family up with the tasks waiting
 While Claude is working on a task, its dot pulses and the row reads **Working** where the time
 would be; a turn that has shown no activity for 15 minutes stops counting, in case the app quit
 mid-turn. Each row shows the session's status, the next step it needs from you, where it runs (Claude app,
-Cowork or Terminal, by icon), the project, branch and ticket status, when it last moved and how long it has run.
+Cowork or Terminal, by icon), the project, branch and ticket status, when it last moved (the last message from you or Claude,
+not the app touching the session) and how long it has run.
 The ticket opens in Jira; a code review shows the teammate's PR it's about, which opens on GitHub.
 Hover a row to pin it to the top of its section, park it, or mark it done. Click it to open the session: desktop
 sessions open in the Claude app, Cowork tasks in its Cowork view; terminal sessions switch to their Terminal tab. One that isn't

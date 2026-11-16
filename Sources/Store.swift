@@ -215,8 +215,8 @@ final class Store: ObservableObject {
     }
 
     // Adds the question a desktop session's last turn left open, whether the user stopped that
-    // turn, and its branch and reviewed PRs (for a Cowork task, also whether a turn is open and
-    // its last prompt),
+    // turn, its branch and reviewed PRs, and when the user or Claude last wrote in it (for a
+    // Cowork task, also whether a turn is open and its last prompt),
     // read again only when its transcript changes. Archived and scheduled sessions are skipped:
     // nobody's waiting there.
     private func withPendingAsk(_ s: Session) -> Session {
@@ -246,7 +246,7 @@ final class Store: ObservableObject {
         s.diffRefs = facts.diffRefs
         s.pushed = facts.pushed
         s.lastWrite = mtime > 0 ? Date(timeIntervalSince1970: mtime) : nil
-        s.lastWorked = tail.lastWorked
+        if let worked = tail.lastWorked { s.lastActivity = worked }
         return s
     }
 
@@ -391,11 +391,10 @@ final class Store: ObservableObject {
 
     func isPinned(_ s: Session) -> Bool { manual.pinned?.contains(s.id) ?? false }
 
-    // Parked until the user unparks it, or works in the session again: a message from them or
-    // Claude, not the app touching the session record (it does on a restart).
+    // Parked until the user unparks it, or works in the session again.
     func isOnHold(_ s: Session) -> Bool {
         guard let at = manual.onHold?[s.id], !isDone(s) else { return false }
-        return (s.lastWorked ?? s.lastActivity).timeIntervalSince1970 <= at + 60
+        return s.lastActivity.timeIntervalSince1970 <= at + 60
     }
 
     func toggleHold(_ s: Session) {

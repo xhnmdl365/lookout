@@ -178,7 +178,7 @@ let triageModel = config.triageModel ?? "sonnet"
 //   blocked, <= 14 days            -> top of "Active"
 //   activity within the days set in Settings (7 by default), or pinned -> "Active"
 //   anything else still open       -> "Idle lately", however old (finished or parked?)
-//   parked (manual)                -> "Parked": no age limit, skipped by Claude, back to normal when the user or Claude writes in it again
+//   parked (manual)                -> "Parked": no age limit, skipped by Claude, back to normal on new activity
 // Auto-done, hard evidence only:
 //   layer 1 (here):   tracked session archived / deleted; all its PRs merged or closed (gh refreshed)
 //                     and no work in the session after the last merge (beyond prGraceHours)

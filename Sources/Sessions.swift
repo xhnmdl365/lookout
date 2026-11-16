@@ -351,13 +351,12 @@ func parseTerminalSession(_ url: URL, mtime: Double, created: Date?) -> Session?
     return Session(
         id: "cli_" + uuid, cliId: uuid,
         title: title ?? (first ?? firstCommand).map(clip) ?? "(terminal session)",
-        cwd: cwd, runCwd: cwd, lastActivity: Date(timeIntervalSince1970: mtime),
+        cwd: cwd, runCwd: cwd, lastActivity: stampDate(lastWorked) ?? Date(timeIntervalSince1970: mtime),
         status: nil,
         detail: (lastPrompt ?? first).map { "Last prompt: " + clip($0) },
         needs: nil, scheduledTaskId: nil, prs: [], archived: false, deleted: false,
         branch: branch, startedAt: created, gitBranch: branch, workBranches: facts.branches,
-        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed, turnOpen: turnOpen,
-        lastWorked: stampDate(lastWorked))
+        reviewRefs: facts.reviewRefs, diffRefs: facts.diffRefs, pushed: facts.pushed, turnOpen: turnOpen)
 }
 
 // How long a session has run, start to last activity: "45m", "3h 20m", "2d 4h".
