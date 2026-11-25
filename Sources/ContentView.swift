@@ -108,6 +108,9 @@ struct ContentView: View {
                 Divider()
                 SettingsView(store: store).canvas()
             } else {
+                if viewDay == nil {
+                    ForEach(store.signInWarnings) { SignInWarning(integration: $0, store: store) }
+                }
                 if viewDay == nil, store.triageEnabled, let err = store.judge?.error {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 10.5)).foregroundStyle(.red)
@@ -401,5 +404,44 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
+    }
+}
+
+// A tool that has signed out: what it no longer checks, and the command that signs it in again.
+// Hidden by the user until that tool next signs out.
+struct SignInWarning: View {
+    let integration: Integration
+    @ObservedObject var store: Store
+    @State private var copied = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.needsYou)
+                .font(.system(size: 11)).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(integration.name) is signed out. \(integration.stopped).")
+                    .font(.system(size: 11, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let fix = integration.fix {
+                    HStack(spacing: 8) {
+                        Text(fix).font(.system(size: 10.5, design: .monospaced)).textSelection(.enabled)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06)))
+                        Button(copied ? "Copied" : "Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(fix, forType: .string)
+                            copied = true
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            Button("Hide") { store.hiddenSignInWarnings.insert(integration.id) }
+                .help("Hide until \(integration.name) signs out again")
+        }
+        .buttonStyle(.borderless).font(.system(size: 11, weight: .medium))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Palette.needsYou.opacity(0.1)))
+        .padding(.horizontal, 10).padding(.bottom, 8)
     }
 }

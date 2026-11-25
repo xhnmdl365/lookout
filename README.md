@@ -141,7 +141,9 @@ brew install acli
 acli jira auth login --web
 ```
 
-**Settings → Integrations** shows which of these are found and signed in.
+**Settings → Integrations** shows which of these are found and signed in. Sign-ins are checked
+again every 10 minutes: when one has expired, a warning at the top of the panel says what has
+stopped (tickets or PRs no longer close tasks) and gives the command to sign in again.
 
 ## Build and run
 

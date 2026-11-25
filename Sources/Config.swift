@@ -44,7 +44,7 @@ struct Config: Codable {
 
 // One outside tool's state: set up, needing a sign-in, or not installed. Claude Code powers
 // Triage and day summaries; GitHub CLI checks PRs; Atlassian CLI (optional) reads Jira tickets.
-struct Integration: Identifiable {
+struct Integration: Identifiable, Equatable {
     enum State { case ready, signedOut, missing }
     let id: String
     let name: String
@@ -53,6 +53,15 @@ struct Integration: Identifiable {
     let detail: String
     let fix: String?  // the command or step that sets it up
     var site: String? = nil  // Jira: the site acli is signed in to
+
+    // What stops while this tool is signed out, for the warning in the panel.
+    var stopped: String {
+        switch id {
+        case "claude": return "Triage and day summaries can't run"
+        case "github": return "PR states aren't checked, so merged PRs don't close tasks"
+        default: return "Jira tickets aren't checked, so Done tickets don't close tasks"
+        }
+    }
 
     static func check() -> [Integration] {
         var out: [Integration] = []

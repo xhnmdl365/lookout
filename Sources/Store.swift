@@ -26,6 +26,15 @@ final class Store: ObservableObject {
     @Published var judging = false
     @Published var triageNote: String?  // a short-lived word on the last Triage click
     @Published var integrations: [Integration] = []
+    // Sign-in warnings the user hid, by integration id. One shows again once that tool has been
+    // signed in and later signs out again.
+    @Published var hiddenSignInWarnings = Set(UserDefaults.standard.stringArray(forKey: "hiddenSignInWarnings") ?? []) {
+        didSet { UserDefaults.standard.set(Array(hiddenSignInWarnings).sorted(), forKey: "hiddenSignInWarnings") }
+    }
+    // Tools that are installed but signed out: what they check silently stops until they're signed in.
+    var signInWarnings: [Integration] {
+        integrations.filter { $0.state == .signedOut && !hiddenSignInWarnings.contains($0.id) }
+    }
     @Published var runs: [JudgeRun] = []
     @Published var days: [String] = []        // snapshot days, oldest first
     @Published var summarizing: String?       // the day Claude is summarizing
@@ -206,15 +215,19 @@ final class Store: ObservableObject {
         if !sessions.isEmpty, Date().timeIntervalSince(lastPrRefresh) > prRefreshMinutes * 60 {
             lastPrRefresh = Date()
             refreshPRs()
+            checkIntegrations()  // a sign-in that expired shows as a warning, not as checks quietly failing
         }
     }
 
-    // What each outside tool can do for this user right now, for the Integrations panel.
+    // What each outside tool can do for this user right now, for the Integrations panel and the
+    // sign-in warnings.
     func checkIntegrations() {
         DispatchQueue.global(qos: .utility).async {
             let found = Integration.check()
             DispatchQueue.main.async {
-                self.integrations = found
+                if found != self.integrations { self.integrations = found }
+                let signedIn = Set(found.filter { $0.state == .ready }.map(\.id))
+                if !self.hiddenSignInWarnings.isDisjoint(with: signedIn) { self.hiddenSignInWarnings.subtract(signedIn) }
                 if config.jiraSite == nil, let site = found.first(where: { $0.id == "jira" })?.site { self.jiraSite = site }
             }
         }
